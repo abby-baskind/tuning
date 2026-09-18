@@ -1,0 +1,27 @@
+# Jupyter's automatically generated notebook checkpoints
+.ipynb_checkpoints/
+
+# Keep this repository flat: ignore every top-level subfolder and everything
+# beneath it. The leading slash scopes the rule to this repository's root;
+# root-level notebooks, scripts, and CSV files remain trackable.
+/*/
+
+# Local exploratory notebooks
+scratch.ipynb
+Optimization_Playground.ipynb
+SurrogateModel.ipynb
+
+# Backup copies retained outside version control
+*.original.ipynb
+
+# Automated cost-function batch artifacts
+#
+# Each batch gets a timestamped directory containing its text logs, summary
+# CSV, and temporary Papermill workspace. The batch script deletes executed
+# notebooks, but ignoring the parent also protects against interrupted runs.
+/batch_output/
+
+# Retained Papermill/nbconvert outputs created manually outside batch_output.
+# These patterns do not match the source notebook cost_function_v2.ipynb.
+*.executed.ipynb
+*_executed.ipynb
