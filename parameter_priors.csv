@@ -1,0 +1,97 @@
+parameter,parameter_type,decision,bottom_ph_relevance,holistic_relevance,confidence_in_current_value,scale,allowed_choices,proposed_low,proposed_high,fixed_value,parent_option,scientific_rationale,future_question,notes
+reg1,float,active,unknown,unknown,unknown,linear,,0.1,0.2,,,Range chosen by top 14 Pareto-rank trials,What is this doing functionally? How do I explain it?,No idea what will happen
+reg2,float,active,unknown,unknown,unknown,linear,,0.08,0.1,,,Range chosen by top 14 Pareto-rank trials,What is this doing functionally? How do I explain it?,No idea what will happen
+gmaxs1,float,reserve,unknown,unknown,high,linear,,,,,,,,"I feel like this is a parameter that could be endlessly tuned and have varying optimal values based on everything else, so it’s not very tractable. Best to stick to 1 value for now. The default value is 3."
+gmaxs2,float,reserve,unknown,unknown,high,linear,,,,,,,,"I feel like this is a parameter that could be endlessly tuned and have varying optimal values based on everything else, so it’s not very tractable. Best to stick to 1 value for now. The default value is 3."
+rrb1,float,reserve,unknown,unknown,medium,linear,,0.2,0.4,,,,Decide whether this parameter is scientifically relevant,Active in reference notebook; not automatically endorsed
+rrb2,float,reserve,unknown,unknown,medium,linear,,0.2,0.4,,,,Decide whether this parameter is scientifically relevant,Active in reference notebook; not automatically endorsed
+rrg1,float,reserve,unknown,unknown,medium,linear,,0.1,0.3,,,,Decide whether this parameter is scientifically relevant,Active in reference notebook; not automatically endorsed
+rrg2,float,reserve,unknown,unknown,medium,linear,,0.1,0.3,,,,Decide whether this parameter is scientifically relevant,Active in reference notebook; not automatically endorsed
+beta1,float,active,unknown,unknown,unknown,linear,,0.3,0.6,,,Range based on literature review: https://docs.google.com/spreadsheets/d/1OR282RDmb8W7CVVoeFP3XP6ODTJrmAyC4qz8AQfh34M/edit?gid=0#gid=0,,Active in reference notebook; not automatically endorsed
+beta2,float,active,unknown,unknown,unknown,linear,,0.3,0.6,,,Range based on literature review: https://docs.google.com/spreadsheets/d/1OR282RDmb8W7CVVoeFP3XP6ODTJrmAyC4qz8AQfh34M/edit?gid=0#gid=0,,Active in reference notebook; not automatically endorsed
+akz1,float,active,unknown,unknown,unknown,linear,,0.5,2,,,Range based on literature review: https://docs.google.com/spreadsheets/d/1OR282RDmb8W7CVVoeFP3XP6ODTJrmAyC4qz8AQfh34M/edit?gid=0#gid=0,Decide whether this parameter is scientifically relevant,
+akz2,float,active,unknown,unknown,unknown,linear,,0.5,2,,,Range based on literature review: https://docs.google.com/spreadsheets/d/1OR282RDmb8W7CVVoeFP3XP6ODTJrmAyC4qz8AQfh34M/edit?gid=0#gid=0,Decide whether this parameter is scientifically relevant,
+PARfrac,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+amaxs1,float,fixed,unknown,unknown,unknown,linear,,,,0.1,,,,Dave and I agree this consistently gets adequate results
+amaxs2,float,fixed,unknown,unknown,unknown,linear,,,,0.1,,,,Dave and I agree this consistently gets adequate results
+parsats1,float,exclude,unknown,unknown,unknown,linear,,,,,,,,
+parsats2,float,exclude,unknown,unknown,unknown,linear,,,,,,,,
+pis1,float,exclude,unknown,unknown,unknown,linear,,,,,,,,
+pis2,float,exclude,unknown,unknown,unknown,linear,,,,,,,,
+akno3s1,float,reserve,unknown,unknown,unknown,linear,,0.5,1.5,,,Range based on literature review: https://docs.google.com/spreadsheets/d/1OR282RDmb8W7CVVoeFP3XP6ODTJrmAyC4qz8AQfh34M/edit?gid=0#gid=0,,
+akno3s2,float,reserve,unknown,unknown,unknown,linear,,0.5,3,,,Range based on literature review: https://docs.google.com/spreadsheets/d/1OR282RDmb8W7CVVoeFP3XP6ODTJrmAyC4qz8AQfh34M/edit?gid=0#gid=0,,
+aknh4s1,float,reserve,unknown,unknown,unknown,linear,,0.05,0.5,,,Range based on literature review: https://docs.google.com/spreadsheets/d/1OR282RDmb8W7CVVoeFP3XP6ODTJrmAyC4qz8AQfh34M/edit?gid=0#gid=0,,
+aknh4s2,float,reserve,unknown,unknown,unknown,linear,,0.05,0.5,,,Range based on literature review: https://docs.google.com/spreadsheets/d/1OR282RDmb8W7CVVoeFP3XP6ODTJrmAyC4qz8AQfh34M/edit?gid=0#gid=0,,
+akpo4s1,float,exclude,unknown,unknown,unknown,linear,,,,,,P not limiting,,
+akpo4s2,float,exclude,unknown,unknown,unknown,linear,,,,,,P not limiting,,
+akco2s1,float,exclude,unknown,unknown,unknown,linear,,,,,,This parameter literally doesn’t do anything,None,
+akco2s2,float,exclude,unknown,unknown,unknown,linear,,,,,,This parameter literally doesn't do anything,None,
+aksio4s2,float,exclude,unknown,unknown,unknown,linear,,0.5,2,,,Range based on literature review: https://docs.google.com/spreadsheets/d/1OR282RDmb8W7CVVoeFP3XP6ODTJrmAyC4qz8AQfh34M/edit?gid=0#gid=0,,
+ak1,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+ak2,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bgamma0,float,exclude,unknown,unknown,unknown,linear,,,,,,Same as Feng 2015,Decide whether this parameter is scientifically relevant,
+bgamma1,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bgamma2,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bgamma3,float,fixed,unknown,unknown,unknown,linear,,,,0.15,,Feng 2015,,Results have kind of been good in a lot of places so might as well reduce dimensionality and use a literature vaue
+bgamma4,float,fixed,unknown,unknown,unknown,linear,,,,0.15,,Feng 2015,,Results have kind of been good in a lot of places so might as well reduce dimensionality and use a literature vaue
+bgamma5,float,active,unknown,unknown,unknown,linear,,0.15,0.4,,,,,
+bgamma5s,float,fixed,unknown,unknown,unknown,linear,,,,0.15,,,,
+bgamma6,float,active,unknown,unknown,unknown,linear,,0.01,0.1,,,,,
+bgamma7,float,fixed,unknown,unknown,unknown,linear,,,,0.27,,Values appear to converge to around 0.25-0.29 from archived runs. Though this disagrees with literature values of 0.05,,
+wsd,float,active,unknown,unknown,unknown,linear,,2,5,,,,Decide whether this parameter is scientifically relevant,Active in reference notebook; not automatically endorsed
+wsdsi,float,exclude,unknown,unknown,unknown,linear,,,,,,,Would it make sense to eventually set this equal to wsd?,
+wsp,float,fixed,unknown,unknown,unknown,linear,,,,0.1,,Feng 2015,Decide whether this parameter is scientifically relevant,
+pco2a,float,exclude,unknown,unknown,unknown,linear,,,,,,The model deals with pCO2a on its own,None,
+si2n,float,exclude,unknown,unknown,unknown,linear,,,,,,,,All stoichiometric ratios were predetermined
+p2n,float,exclude,unknown,unknown,unknown,linear,,,,,,,,All stoichiometric ratios were predetermined
+o2no,float,exclude,unknown,unknown,unknown,linear,,,,,,,,All stoichiometric ratios were predetermined
+o2nh,float,exclude,unknown,unknown,unknown,linear,,,,,,,,All stoichiometric ratios were predetermined
+c2n,float,exclude,unknown,unknown,unknown,linear,,,,,,,,All stoichiometric ratios were predetermined
+ro5,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+ro6,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+ro7,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+akox,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+Chl2cs1_m,float,fixed,unknown,unknown,unknown,linear,,,,0.02675,,This is the value used in Feng 2015,None,I think it is totally defensible to use a value already used in the literature
+Chl2cs2_m,float,fixed,unknown,unknown,unknown,linear,,,,0.02675,,This is the value used in Feng 2015,None,I think it is totally defensible to use a value already used in the literature
+bUmax_nspc0,float,fixed,unknown,unknown,unknown,linear,,,,0.05,,I’ve done enough trials of bUmax that I feel this is narrowed down considerably so the chosen value should be at least close,Is this value good enough? Does tuning it further actually help?,
+bUmax_nspc1,float,fixed,unknown,unknown,unknown,linear,,,,0.004,,I’ve done enough trials of bUmax that I feel this is narrowed down considerably so the chosen value should be at least close,Is this value good enough? Does tuning it further actually help?,
+bUmax_nspc2,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bUmaxSi_nspc0,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bUmaxSi_nspc1,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bUmaxSi_nspc2,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bdep,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+balpha,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bw,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+btheta_diag,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bnit,float,fixed,unknown,unknown,medium,linear,,,,0.15,,Archived runs seem to converge on this,,
+btheta_nit,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bdo_nit,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bdenit,float,fixed,unknown,unknown,unknown,linear,,,,1,,,,I’m trusting Dave;s results on this
+btheta_denit,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bpsi_n,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bdo_c,float,reserve,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bao2,float,fixed,unknown,unknown,unknown,linear,,,,2,,For consistency with water column denitrification stoichiometry,Decide whether this parameter is scientifically relevant,
+bpi,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bpsi_p,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfc_nspc0,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfc_nspc1,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfc_nspc2,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfn_nspc0,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfn_nspc1,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfn_nspc2,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfp_nspc0,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfp_nspc1,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfp_nspc2,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfs_nspc0,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfs_nspc1,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+bfs_nspc2,float,exclude,unknown,unknown,unknown,linear,,,,,,,Decide whether this parameter is scientifically relevant,
+nl_tnu2_tracer9,float,fixed,unknown,unknown,unknown,linear,,,,0.5,,Will need to check against physical tuning,Decide whether this parameter is scientifically relevant,Active in reference notebook; not automatically endorsed
+tracer9_advection_scheme,categorical,exclude,unknown,unknown,unknown,categorical,Upstream3_Centered4|HSIMT|Akima4|MPDATA,,,,,Will need to check against physical tuning,Is this appropriate to vary in the focused search?,Active in reference notebook; not automatically endorsed
+CACO3,boolean,exclude,unknown,unknown,unknown,categorical,False|True,,,,,Compile-time CPP option,Candidate executable and template workflow must support this option,Operationally unavailable for new candidates
+cacopf,float,exclude,unknown,unknown,unknown,linear,,,,,CACO3,Conditional CACO3 parameter,Only analyze among CACO3-enabled runs,Not applicable when CACO3 is disabled
+cacodr,float,exclude,unknown,unknown,unknown,linear,,,,,CACO3,Conditional CACO3 parameter,Only analyze among CACO3-enabled runs,Not applicable when CACO3 is disabled
+omega_thresh,float,exclude,unknown,unknown,unknown,linear,,,,,CACO3,Conditional CACO3 parameter,Only analyze among CACO3-enabled runs,Not applicable when CACO3 is disabled
+wsPCa,float,exclude,unknown,unknown,unknown,linear,,,,,CACO3,Conditional CACO3 parameter,Only analyze among CACO3-enabled runs,Not applicable when CACO3 is disabled
+bUmaxCa_nspc0,float,exclude,unknown,unknown,unknown,linear,,,,,CACO3,Conditional CACO3 parameter,Only analyze among CACO3-enabled runs,Not applicable when CACO3 is disabled
+bUmaxCa_nspc1,float,exclude,unknown,unknown,unknown,linear,,,,,CACO3,Conditional CACO3 parameter,Only analyze among CACO3-enabled runs,Not applicable when CACO3 is disabled
+bUmaxCa_nspc2,float,exclude,unknown,unknown,unknown,linear,,,,,CACO3,Conditional CACO3 parameter,Only analyze among CACO3-enabled runs,Not applicable when CACO3 is disabled

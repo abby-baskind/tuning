@@ -1,0 +1,7 @@
+# Minimal dependencies for the helper-module regression suite
+netCDF4
+numpy
+optuna
+pandas
+scikit-learn
+xarray

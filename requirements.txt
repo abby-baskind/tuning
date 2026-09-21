@@ -1,0 +1,16 @@
+# Notebook and analysis environment (Python 3.11+)
+ipython
+jupyterlab
+matplotlib
+netCDF4
+numpy
+openpyxl
+optuna
+pandas
+papermill
+PyCO2SYS
+requests
+scikit-learn
+scipy
+xarray
+gsw

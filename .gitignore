@@ -1,17 +1,37 @@
+# Operating-system and editor files
+.DS_Store
+.idea/
+.vscode/
+*~
+
+# Python environments, caches, and test artifacts
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
 # Jupyter's automatically generated notebook checkpoints
 .ipynb_checkpoints/
 
-# Keep this repository flat: ignore every top-level subfolder and everything
-# beneath it. The leading slash scopes the rule to this repository's root;
-# root-level notebooks, scripts, and CSV files remain trackable.
-/*/
+# Notebooks are private by default. Public workflow notebooks must be named
+# explicitly here so a scratch or data-heavy notebook cannot be pushed by
+# accident. The first five entries are already in the public Git history.
+*.ipynb
+!CandidateParameterSets.ipynb
+!CandidateParameterSetsBio.ipynb
+!CandidateParameterSetsBio_MultiObjectiveTPE.ipynb
+!CandidateParameterSetsPhysical.ipynb
+!ParameterAnalysis.ipynb
+!cost_function_v2.ipynb
 
-# Local exploratory notebooks
+# Local exploratory notebooks and backups retained outside version control.
 scratch.ipynb
 Optimization_Playground.ipynb
 SurrogateModel.ipynb
-
-# Backup copies retained outside version control
 *.original.ipynb
 
 # Automated cost-function batch artifacts
@@ -25,3 +45,8 @@ SurrogateModel.ipynb
 # These patterns do not match the source notebook cost_function_v2.ipynb.
 *.executed.ipynb
 *_executed.ipynb
+
+# Local databases and generated analysis products
+*.db
+*.sqlite
+*.sqlite3
