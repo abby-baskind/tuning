@@ -562,6 +562,14 @@ probabilities and preference ratios. These describe TPE's search preference over
 the configured bounds and observations; they do not prove a scientifically true
 parameter value.
 
+The notebook follows the TPE plots with a separate inactive-parameter diagnostic.
+It can compare selected numeric `fixed` and `reserve` parameters using the same
+green/gray visual language, but those distributions are empirical historical
+evidence rather than TPE `l(x)` and `g(x)` models. The diagnostic also reports the
+current fixed or baseline value, proposed bounds, tested range, sample counts,
+relevance, readiness, and confounding. Use it to decide what deserves a future
+tuning round; it does not modify the current search space or study.
+
 Exact TPE reconstruction uses private Optuna APIs because no stable public API
 exposes the fitted Parzen models. It is isolated in one helper function and
 validated for Optuna 4.9.x. If the version changes, empirical promising-run plots

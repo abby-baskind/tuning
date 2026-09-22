@@ -1,0 +1,162 @@
+# =============================================================================
+# PHYS SCIENTIFIC SPECIFICATION
+# =============================================================================
+# This is the main file to edit when the scientific rules change.  The notebook
+# and helper code should normally not need edits just because an allowed value or
+# approved combination changes.
+#
+# Normal workflow:
+#   1. Run the notebook in audit mode.
+#   2. Review the observed-combination tables written under PHYS/audit/.
+#   3. Edit ONLY the clearly marked review areas below.
+#   4. Change each relevant review_status from "pending" to "approved".
+#   5. Rerun the audit and inspect the proposed candidate count.
+#   6. Only then enable candidate generation in the notebook control panel.
+#
+# Historical evidence and future candidates are deliberately different:
+#   * Historical runs remain available even when they use disallowed values.
+#   * candidate_allowed and candidate_values govern NEW candidates only.
+#   * Nothing in this file rewrites or deletes historical station files.
+#
+# TOML reminders:
+#   * Strings need quotes.
+#   * true/false are lowercase.
+#   * Keep commas between list entries.
+#   * Do not rename keys unless the helper and documentation are also updated.
+
+schema_version = 1
+
+[workflow]
+# "component_factorial" crosses approved component levels.  Every internal
+# component is historically observed, although the cross-component combination
+# may be new.  This is the recommended default.
+#
+# "observed_configurations_only" permits only complete joint configurations
+# already found in the archive.  The initial audit found only one eligible exact
+# configuration under the current restrictions, so this mode is very narrow.
+candidate_space_mode = "component_factorial"
+
+# "factorial" requests every allowed cell.  "tpe" requests only TRIAL_BUDGET
+# cells through a single-objective categorical TPE sampler.  Choose after
+# inspecting the factorial size in the notebook.
+candidate_strategy = "factorial"
+
+# Used only when candidate_strategy = "tpe".
+trial_budget = 12
+random_seed = 42
+
+# Historical runs that violate candidate restrictions remain evidence in the
+# archive analysis.  Keep this true unless the scientific policy changes.
+retain_all_historical_evidence = true
+
+[numeric_policy]
+# PHYS does not invent values for numeric parameters.  Any varied numeric field
+# not explicitly made active below is fixed to the value in the latest readable
+# station file, where "latest" is based on the station history timestamp.
+only_explicit_discrete_values = true
+unspecified_varied_numeric_action = "fix_to_latest"
+
+[nl_tnu2]
+# These two station-file fields are one coupled scientific decision.
+members = ["nl_tnu2_tracer0", "nl_tnu2_tracer1"]
+require_equal = true
+
+# EDIT HERE if future scientific review changes the allowed NEW values.
+# Historical 2.0 and 4.0 runs remain in analysis but are not candidate levels.
+candidate_values = [0.5, 1.0]
+rationale = "Use only approved historically tested values; 2.0 and 4.0 are too high for additional testing."
+
+[advection]
+# The station file is authoritative for spelling.  The archive audit confirmed
+# that the exact token is HSIMT (not HMIST or HSMIT).
+require_temp_salt_match = true
+
+[[advection.schemes]]
+name = "U3_C4"
+horizontal = "Upstream3"
+vertical = "Centered4"
+candidate_allowed = true
+rationale = "Approved for additional testing."
+
+[[advection.schemes]]
+name = "A4_A4"
+horizontal = "Akima4"
+vertical = "Akima4"
+candidate_allowed = true
+rationale = "Approved for additional testing."
+
+[[advection.schemes]]
+name = "MPDATA_MPDATA"
+horizontal = "MPDATA"
+vertical = "MPDATA"
+candidate_allowed = false
+rationale = "Retain as historical evidence only; can be buggy and slow."
+
+[[advection.schemes]]
+name = "HSIMT_HSIMT"
+horizontal = "HSIMT"
+vertical = "HSIMT"
+candidate_allowed = false
+rationale = "Retain as historical evidence only; can be buggy and slow."
+
+[mixing_orientation]
+# Exactly one UV option and one TS option must be enabled.  New candidates may
+# use only pairs observed in the archive; they are never crossed independently.
+uv_group = ["MIX_S_UV", "MIX_ISO_UV", "MIX_GEO_UV"]
+ts_group = ["MIX_S_TS", "MIX_ISO_TS", "MIX_GEO_TS"]
+
+# REQUIRED REVIEW: The audit initially found the three pairs listed below.
+# Confirm that each should be eligible, remove any that should not, and then
+# change review_status to "approved".  The notebook will not create candidates
+# while this remains pending.
+review_status = "approved"
+
+[[mixing_orientation.approved_pairs]]
+name = "S_UV__GEO_TS"
+uv = "MIX_S_UV"
+ts = "MIX_GEO_TS"
+
+[[mixing_orientation.approved_pairs]]
+name = "GEO_UV__ISO_TS"
+uv = "MIX_GEO_UV"
+ts = "MIX_ISO_TS"
+
+[[mixing_orientation.approved_pairs]]
+name = "GEO_UV__GEO_TS"
+uv = "MIX_GEO_UV"
+ts = "MIX_GEO_TS"
+
+[mass_conservation_bundle]
+# External testing established this as a hard future-candidate requirement.
+# Historical runs lacking the bundle remain in broad archive analyses.
+required_true = ["GLS_MIXING", "RI_SPLINES", "N2S2_HORAVG"]
+rationale = "All three are required together for acceptable mass conservation."
+
+[optional_cpp_options]
+# These options are represented as JOINT states, not independent switches.  This
+# preserves observed relationships such as CRAIG_BANNER appearing with
+# KANTHA_CLAYSON in the archive.
+tracked = ["KANTHA_CLAYSON", "CRAIG_BANNER", "CANUTO_A"]
+
+# REQUIRED REVIEW: These are the four optional-option states observed somewhere
+# in the readable archive.  Crossing them with the fixed RI_SPLINES bundle can
+# create complete combinations not previously run.  Keep only states you want
+# considered, then change review_status to "approved".
+review_status = "approved"
+
+[[optional_cpp_options.approved_combinations]]
+name = "none"
+enabled = []
+
+[[optional_cpp_options.approved_combinations]]
+name = "KANTHA_CLAYSON_only"
+enabled = ["KANTHA_CLAYSON"]
+
+[[optional_cpp_options.approved_combinations]]
+name = "CANUTO_A_only"
+enabled = ["CANUTO_A"]
+
+[[optional_cpp_options.approved_combinations]]
+name = "KANTHA_CLAYSON_and_CRAIG_BANNER"
+enabled = ["KANTHA_CLAYSON", "CRAIG_BANNER"]
+
