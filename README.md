@@ -18,11 +18,17 @@ against those local archives.
 | Multi-objective biological tuning | `CandidateParameterSetsBio_MultiObjectiveTPE.ipynb` | `candidate_parameter_utils.py`, `parameter_priors.csv`, `MULTIOBJECTIVE_TPE_GUIDE.md` |
 | Constrained physical tuning | `CandidateParameterSetsPhysical.ipynb` | `physical_candidate_utils.py`, `physical_tuning_spec.toml`, `PHYSICAL_TUNING_GUIDE.md` |
 | Cost calculation | `cost_function_v2.ipynb` | `run_cost_batch.sh`, `cost_runs.csv`, `cost_analysis_history.csv` |
+| Multi-year model skill | `OPTUNA_66_skill_analysis.ipynb` | `model_skill_metrics.py`, `skill_priority_weights.csv` |
 | Parameter analysis | `ParameterAnalysis.ipynb` | Historical run and cost inputs |
 
 `CandidateParameterSets.ipynb` and `CandidateParameterSetsBio.ipynb` are the
 earlier candidate-generation workflows retained for continuity with existing
 studies.
+
+The PHYS workflow also audits paired surface-bottom temperature, salinity, and
+potential-density stratification by station. PD, BR, and CP are configured as
+the Upper Bay group; these diagnostics remain separate from the established
+four-component physical objective.
 
 ## Requirements
 
@@ -43,6 +49,28 @@ Several notebooks start with machine-specific default paths. Review their
 control cells before running them. The multi-objective workflow also supports
 the `ROMS_OPT_DIR` and `ROMS_COST_DIR` environment variables; see its guide for
 details.
+
+## Multi-year model skill
+
+`model_skill_metrics.py` calculates annual and observation-weighted pooled
+Jolliff target statistics, normalized Taylor statistics, dimensional RMSE, and
+Ward normalized-MSE cost from the collocated pairs in cost-summary NetCDF
+files. It also creates target and Taylor diagrams plus collocated time-series
+and residual diagnostics. Primary production and benthic variables are
+excluded by default; CHRP nutrients are included whenever observations exist.
+
+Run the current Optuna 66 analysis with:
+
+```bash
+python model_skill_metrics.py --run OPTUNA_66 --years 2005 2006
+```
+
+The default outputs are written below
+`/Users/akbaskind/Desktop/SKILL/<run>/<year-range>/`. Existing outputs require
+the explicit `--overwrite` option. Component priorities default to one and can
+be changed in `skill_priority_weights.csv`; each output directory retains a
+copy of the weights actually applied. The companion notebook provides an
+interactive view without duplicating the calculation logic.
 
 ## Getting started
 

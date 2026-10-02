@@ -13,6 +13,77 @@ import candidate_parameter_utils as cpu
 
 class CandidateParameterUtilityTests(unittest.TestCase):
 
+  def test_registration_serializes_station_timestamp_for_optuna(self):
+    import optuna
+
+    study = optuna.create_study(directions=["minimize", "minimize"])
+    trial = study.ask()
+    trial.set_user_attr("Run Name", "candidate_1")
+    archive = pd.DataFrame(
+        [
+            {
+                "Run Name": "candidate_1",
+                "Cost": 12.5,
+                "Bottom pH Objective": 0.75,
+                "Station Run Date": pd.Timestamp("2026-09-24"),
+                "dstart_year": 2005,
+            }
+        ]
+    )
+
+    registration = cpu.synchronize_running_trials(
+        study,
+        archive,
+        commit=True,
+    )
+
+    completed = study.trials[0]
+    self.assertEqual(registration.at[0, "Status"], "completed")
+    self.assertEqual(completed.state, optuna.trial.TrialState.COMPLETE)
+    self.assertEqual(completed.user_attrs["Station Run Date"], "2026-09-24")
+    self.assertEqual(completed.user_attrs["Model Year"], 2005)
+
+  def test_save_figure_uses_consistent_notebook_defaults(self):
+    class Figure:
+      def __init__(self):
+        self.calls = []
+
+      def savefig(self, path, **kwargs):
+        self.calls.append((path, kwargs))
+
+    figure = Figure()
+    with tempfile.TemporaryDirectory() as directory:
+      output = Path(directory) / "figures" / "example.png"
+      returned = cpu.save_figure(figure, output, dpi=300)
+
+      self.assertEqual(returned, output)
+      self.assertTrue(output.parent.is_dir())
+      self.assertEqual(figure.calls[0][0], output)
+      self.assertEqual(figure.calls[0][1]["dpi"], 300)
+      self.assertEqual(figure.calls[0][1]["bbox_inches"], "tight")
+
+  def test_model_year_uses_first_ocean_time_instead_of_original_epoch(self):
+    class Variable:
+      def __init__(self, values, units):
+        self.values = np.asarray(values)
+        self.units = units
+        self.calendar = "proleptic_gregorian"
+
+      def __getitem__(self, key):
+        return self.values[key]
+
+    class Dataset:
+      variables = {
+          "dstart": Variable(0.0, "days since 2005-01-01 00:00:00"),
+          "ocean_time": Variable(
+              [31536000.0, 63072000.0],
+              "seconds since 2005-01-01 00:00:00",
+          ),
+      }
+
+    self.assertEqual(cpu.get_dstart_year(Dataset()), 2005)
+    self.assertEqual(cpu.get_model_year(Dataset()), 2006)
+
   def test_mo_bio_output_layout_is_rooted_consistently(self):
     paths = cpu.MoBioOutputPaths(Path("/tmp/example_mo_bio"))
     self.assertEqual(
@@ -276,6 +347,149 @@ class CandidateParameterUtilityTests(unittest.TestCase):
             multivariate=False,
             historical_numeric_import_policy="candidate_bounds",
         )
+
+
+  def test_transition_name_policy_handles_embedded_and_legacy_years(self):
+    self.assertEqual(
+        cpu.propose_transition_target_name(
+            "LHS20_2005_OLD", action="continuation", source_year=2005, target_year=2006
+        ),
+        "LHS20_2006_OLD",
+    )
+    self.assertEqual(
+        cpu.propose_transition_target_name(
+            "OPTUNA_66", action="continuation", source_year=2005, target_year=2006
+        ),
+        "OPTUNA_66_2006",
+    )
+    self.assertEqual(
+        cpu.propose_transition_target_name(
+            "X_2006", action="backcast", source_year=2006, target_year=2005
+        ),
+        "X_BACKCAST_2005",
+    )
+
+
+  def test_inventory_keeps_later_optuna_year_but_strips_legacy_2005_suffix(self):
+    runs = pd.DataFrame(
+        {
+            "Run Name": ["OPTUNA_BIO_MO_111", "OPTUNA_BIO_MO_118", "LHS20_2005_OLD"],
+            "Station File": [
+                "ocean_sta_OPTUNA_BIO_MO_111_2005.nc",
+                "ocean_sta_OPTUNA_BIO_MO_118_2006.nc",
+                "ocean_sta_LHS20_2005_OLD.nc",
+            ],
+        }
+    )
+    normalized = cpu.normalize_run_inventory_names(runs)
+    self.assertEqual(
+        normalized["Run Name"].tolist(),
+        ["OPTUNA_BIO_MO_111", "OPTUNA_BIO_MO_118_2006", "LHS20_2005_OLD"],
+    )
+
+
+  def test_transition_plan_loader_and_incremental_additions(self):
+    with tempfile.TemporaryDirectory() as directory:
+      workbook = Path(directory) / "FileNames.xlsx"
+      empty_plan = pd.DataFrame(columns=cpu.TRANSITION_COLUMNS)
+      with pd.ExcelWriter(workbook) as writer:
+        pd.DataFrame(
+            {"Station File": ["ocean_sta_X.nc"], "Run Name": ["X"], "Cost File": ["X.nc"]}
+        ).to_excel(writer, sheet_name="Master", index=False)
+        empty_plan.to_excel(writer, sheet_name="MO-BIO Year Transitions", index=False)
+      loaded = cpu.load_year_transition_plan(workbook)
+      additions = cpu.planned_transition_additions(
+          ["LHS20_2005_OLD", "OPTUNA_66"],
+          action="continuation",
+          source_year=2005,
+          target_year=2006,
+          archive=pd.DataFrame(
+              {
+                  "Run Name": ["LHS20_2005_OLD", "OPTUNA_66"],
+                  "dstart_year": [2005, 2005],
+              }
+          ),
+          existing_plan=loaded,
+      )
+    self.assertEqual(
+        additions["Target Run"].tolist(), ["LHS20_2006_OLD", "OPTUNA_66_2006"]
+    )
+
+
+  def test_cross_year_parameter_matches_ignore_inactive_children(self):
+    priors = pd.DataFrame(
+        {
+            "parameter": ["numeric_x", "parent", "child"],
+            "parameter_type": ["float", "boolean", "float"],
+            "parent_option": ["", "", "parent"],
+        }
+    )
+    frame = pd.DataFrame(
+        {
+            "Run Name": ["X_2005", "X_2006", "Y_2006"],
+            "dstart_year": [2005, 2006, 2006],
+            "numeric_x": [1.0, 1.0 + 1e-12, 2.0],
+            "parent": [False, False, True],
+            "child": [4.0, 999.0, 4.0],
+            "Cost": [2.0, 3.0, 1.0],
+            "Bottom pH Objective": [0.5, 0.7, 0.4],
+            "Pareto Rank": [0, 1, 0],
+        }
+    )
+    labeled = cpu.add_biological_parameter_match_groups(frame, priors)
+    self.assertEqual(
+        labeled.loc[0, "Parameter Match Group"], labeled.loc[1, "Parameter Match Group"]
+    )
+    self.assertTrue(bool(labeled.loc[0, "Cross-Year Parameter Match"]))
+    comparisons = cpu.matched_year_comparisons(labeled)
+    self.assertEqual(len(comparisons), 1)
+    self.assertAlmostEqual(comparisons.at[0, "Change in Cost"], 1.0)
+
+
+  def test_trial_provenance_resolves_legacy_year_from_archive(self):
+    class State:
+      name = "COMPLETE"
+
+    class Trial:
+      number = 4
+      state = State()
+      user_attrs = {"Run Name": "legacy", "Origin": "Historical archive"}
+      datetime_start = None
+      datetime_complete = None
+
+    class Study:
+      trials = [Trial()]
+
+    provenance = cpu.trial_provenance_table(
+        Study(), pd.DataFrame({"Run Name": ["legacy"], "dstart_year": [2006]})
+    )
+    self.assertEqual(provenance.at[0, "Model Year"], 2006)
+    self.assertEqual(provenance.at[0, "Model Year Source"], "Archive lookup")
+
+
+  @unittest.skipUnless(importlib.util.find_spec("optuna"), "Optuna not installed")
+  def test_candidate_year_suffix_and_context_are_recorded(self):
+    import optuna
+
+    study = optuna.create_study(directions=["minimize", "minimize"])
+    candidates = cpu.ask_candidate_trials(
+        study,
+        numeric_bounds={"x": (0.0, 1.0)},
+        categorical_choices={},
+        count=1,
+        run_name_prefix="OPTUNA_BIO_MO_",
+        run_name_suffix="_2006",
+        objective_version="test",
+        trial_user_attrs={
+            "Candidate Target Year": 2006,
+            "Initialization Source Run": "OPTUNA_66",
+        },
+    )
+    self.assertEqual(candidates.at[0, "Run Name"], "OPTUNA_BIO_MO_0_2006")
+    self.assertEqual(study.trials[0].user_attrs["Candidate Target Year"], 2006)
+    self.assertEqual(
+        study.trials[0].user_attrs["Initialization Source Run"], "OPTUNA_66"
+    )
 
 
   def test_readiness_respects_decision_for_confounded_parameters(self):

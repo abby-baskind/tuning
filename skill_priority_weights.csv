@@ -1,0 +1,26 @@
+component,priority_weight,description
+temperature__surface,1.0,NBFSMN surface temperature
+temperature__bottom,1.0,NBFSMN bottom temperature
+salinity__surface,1.0,NBFSMN surface salinity
+salinity__bottom,1.0,NBFSMN bottom salinity
+ph__surface,1.0,NBFSMN surface pH
+ph__bottom,1.0,NBFSMN bottom pH
+oxygen__surface,1.0,NBFSMN surface dissolved oxygen
+oxygen__bottom,1.0,NBFSMN bottom dissolved oxygen
+plt_no3__surface,1.0,PLT surface nitrate
+plt_no3__bottom,1.0,PLT bottom nitrate
+plt_nh4__surface,1.0,PLT surface ammonium
+plt_nh4__bottom,1.0,PLT bottom ammonium
+plt_si__surface,1.0,PLT surface silicate
+plt_si__bottom,1.0,PLT bottom silicate
+chrp_no3__surface,1.0,CHRP surface nitrate
+chrp_no3__bottom,1.0,CHRP bottom nitrate when available
+chrp_nh4__surface,1.0,CHRP surface ammonium
+chrp_nh4__bottom,1.0,CHRP bottom ammonium when available
+chrp_si__surface,1.0,CHRP surface silicate
+chrp_si__bottom,1.0,CHRP bottom silicate when available
+secchi__not_applicable,1.0,PLT Secchi depth
+primary_production__not_applicable,1.0,Optional primary production
+sediment_oxygen__not_applicable,1.0,Optional sediment oxygen flux
+sediment_no3__not_applicable,1.0,Optional sediment nitrate flux
+sediment_nh4__not_applicable,1.0,Optional sediment ammonium flux

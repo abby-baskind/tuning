@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
+from itertools import combinations
 import json
 import math
 from pathlib import Path
@@ -31,6 +32,17 @@ CONFIDENCE_LEVELS = {"high", "medium", "low", "unknown"}
 PARAMETER_TYPES = {"float", "integer", "categorical", "boolean"}
 SCALES = {"linear", "log", "categorical"}
 CORRECTION_ACTIONS = {"replace", "accept", "set_missing", "exclude_run", "unresolved"}
+TRANSITION_ACTIONS = {"continuation", "backcast"}
+TRANSITION_STATUSES = {"planned", "inputs_written", "submitted", "complete", "cancelled"}
+TRANSITION_COLUMNS = [
+    "Action",
+    "Source Run",
+    "Target Run",
+    "Source Year",
+    "Target Year",
+    "Status",
+    "Notes",
+]
 
 PRIOR_COLUMNS = [
     "parameter",
@@ -128,6 +140,26 @@ class MoBioOutputPaths:
     def candidate_input_directory(self) -> Path:
         return self.candidate_directory / "input_files"
 
+    def transition_input_directory(self, action: str, target_year: int) -> Path:
+        """Return the organized input directory for one year-transition action."""
+
+        action = str(action).strip().lower()
+        if action not in TRANSITION_ACTIONS:
+            raise ValueError(f"Unknown year-transition action: {action!r}")
+        plural = "continuations" if action == "continuation" else "backcasts"
+        return self.candidate_directory / plural / str(int(target_year)) / "input_files"
+
+    def transition_manifest_file(self, action: str, target_year: int) -> Path:
+        """Return the durable manifest path for one transition action and year."""
+
+        directory = self.transition_input_directory(action, target_year).parent
+        filename = (
+            "continuation_manifest.csv"
+            if str(action).strip().lower() == "continuation"
+            else "backcast_manifest.csv"
+        )
+        return directory / filename
+
     @property
     def provenance_directory(self) -> Path:
         return self.root / "provenance"
@@ -193,6 +225,20 @@ def ensure_mo_bio_output_layout(paths: MoBioOutputPaths) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def save_figure(
+    figure: Any,
+    output_file: Path | str,
+    *,
+    dpi: int = 250,
+) -> Path:
+    """Save a notebook figure consistently and return its resolved path."""
+
+    path = Path(output_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    return path
+
+
 def file_sha256(path: Path | str) -> str:
     """Return a streaming SHA-256 digest for provenance and migration checks."""
 
@@ -207,6 +253,41 @@ def utc_now_text() -> str:
     """Return a stable UTC timestamp for logs and generated metadata."""
 
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def normalize_run_inventory_names(
+    runs: pd.DataFrame,
+    *,
+    run_column: str = "Run Name",
+    station_column: str = "Station File",
+) -> pd.DataFrame:
+    """Apply the legacy-unsuffixed-2005 naming policy to inventory records.
+
+    Excel historically strips a terminal year from OPTUNA station filenames.
+    MO-BIO keeps that behavior only for 2005; years from 2006 onward remain in
+    the official run name.
+    """
+
+    required = {run_column, station_column}
+    missing = sorted(required.difference(runs.columns))
+    if missing:
+        raise ValueError(f"Run inventory is missing columns: {missing}")
+    normalized = runs.copy()
+    names: list[str] = []
+    for _, row in normalized.iterrows():
+        supplied = str(row[run_column]).strip()
+        station = Path(str(row[station_column])).name
+        derived = re.sub(r"\.nc$", "", re.sub(r"^ocean_sta_", "", station))
+        if derived.startswith("OPTUNA_"):
+            derived = re.sub(r"_2005$", "", derived)
+            names.append(derived)
+        else:
+            names.append(supplied)
+    normalized[run_column] = names
+    if normalized[run_column].duplicated().any():
+        duplicates = sorted(normalized.loc[normalized[run_column].duplicated(False), run_column].unique())
+        raise ValueError(f"Normalized run inventory contains duplicate names: {duplicates}")
+    return normalized
 
 
 def _clean_text(value: Any) -> str:
@@ -592,6 +673,42 @@ def get_dstart_year(dataset: Any, variable_name: str = "dstart") -> float | int:
     return int(timestamp.year)
 
 
+def get_model_year(
+    dataset: Any,
+    *,
+    time_variable_name: str = "ocean_time",
+    fallback_variable_name: str = "dstart",
+) -> float | int:
+    """Return the year of the first modeled record in a station file.
+
+    ROMS continuation files can retain the original simulation epoch in
+    ``dstart``.  The first value of ``ocean_time`` identifies the year actually
+    represented by that file.  Older files without usable model time fall back
+    to the scalar ``dstart`` value.
+    """
+
+    if time_variable_name in dataset.variables:
+        variable = dataset.variables[time_variable_name]
+        values = np.ma.asarray(variable[...]).reshape(-1)
+        usable = values.compressed() if np.ma.isMaskedArray(values) else np.asarray(values)
+        if usable.size:
+            value = usable[0]
+            if np.issubdtype(np.asarray(value).dtype, np.datetime64):
+                return int(pd.to_datetime(value).year)
+            units = getattr(variable, "units", None)
+            if units is not None:
+                from netCDF4 import num2date
+
+                timestamp = num2date(
+                    np.asarray(value).item(),
+                    units=units,
+                    calendar=getattr(variable, "calendar", "standard"),
+                    only_use_cftime_datetimes=False,
+                )
+                return int(timestamp.year)
+    return get_dstart_year(dataset, variable_name=fallback_variable_name)
+
+
 def get_cpp_option_states(
     dataset: Any,
     option_names: Sequence[str],
@@ -767,7 +884,10 @@ def refresh_run_archive(
                     if parameter in conditional_station_variables:
                         continue
                     result.update(get_parameter_values(dataset, parameter))
-                result["dstart_year"] = get_dstart_year(dataset)
+                # Keep the legacy column name for compatibility. Its value is
+                # the year of the first modeled record, not necessarily the
+                # reference epoch stored in ROMS dstart.
+                result["dstart_year"] = get_model_year(dataset)
                 run_date, fallback, history = get_run_date_from_history(dataset)
                 result["Station Run Date"] = run_date
                 result["Station Date Is Fallback"] = fallback
@@ -1053,6 +1173,597 @@ def write_candidate_input_files(
             }
         )
     return pd.DataFrame(records)
+
+
+# ---------------------------------------------------------------------------
+# Model-year context, cross-year matches, and transition planning
+# ---------------------------------------------------------------------------
+
+
+def load_year_transition_plan(
+    workbook: Path | str,
+    *,
+    sheet_name: str = "MO-BIO Year Transitions",
+) -> pd.DataFrame:
+    """Read and validate the user-maintained continuation/backcast ledger."""
+
+    path = Path(workbook)
+    try:
+        plan = pd.read_excel(path, sheet_name=sheet_name)
+    except ValueError as error:
+        raise ValueError(
+            f"Workbook {path} is missing worksheet {sheet_name!r}."
+        ) from error
+    plan.columns = plan.columns.astype(str).str.strip()
+    missing = [column for column in TRANSITION_COLUMNS if column not in plan.columns]
+    if missing:
+        raise ValueError(
+            f"Worksheet {sheet_name!r} is missing columns: {missing}. "
+            f"Expected {TRANSITION_COLUMNS}."
+        )
+    plan = plan[TRANSITION_COLUMNS].dropna(how="all").copy()
+    if plan.empty:
+        return pd.DataFrame(columns=TRANSITION_COLUMNS)
+
+    for column in ("Action", "Source Run", "Target Run", "Status"):
+        plan[column] = plan[column].fillna("").astype(str).str.strip()
+    plan["Action"] = plan["Action"].str.lower()
+    plan["Status"] = plan["Status"].str.lower()
+    for column in ("Source Year", "Target Year"):
+        numeric = pd.to_numeric(plan[column], errors="coerce")
+        if numeric.isna().any() or (numeric % 1 != 0).any():
+            bad_rows = (numeric.isna() | (numeric % 1 != 0)).to_numpy().nonzero()[0] + 2
+            raise ValueError(f"{column} must contain whole years; check Excel rows {bad_rows.tolist()}")
+        plan[column] = numeric.astype(int)
+
+    invalid_actions = sorted(set(plan["Action"]) - TRANSITION_ACTIONS)
+    invalid_statuses = sorted(set(plan["Status"]) - TRANSITION_STATUSES)
+    if invalid_actions:
+        raise ValueError(f"Unknown transition actions: {invalid_actions}")
+    if invalid_statuses:
+        raise ValueError(f"Unknown transition statuses: {invalid_statuses}")
+    if plan["Source Run"].eq("").any() or plan["Target Run"].eq("").any():
+        raise ValueError("Every transition row requires Source Run and Target Run")
+    if plan["Target Run"].duplicated().any():
+        duplicates = sorted(plan.loc[plan["Target Run"].duplicated(False), "Target Run"].unique())
+        raise ValueError(f"Transition target run names must be unique: {duplicates}")
+    same = plan["Source Run"].eq(plan["Target Run"])
+    if same.any():
+        raise ValueError("Source Run and Target Run must differ")
+    return plan.reset_index(drop=True)
+
+
+def propose_transition_target_name(
+    source_run: str,
+    *,
+    action: str,
+    source_year: int,
+    target_year: int,
+) -> str:
+    """Apply the documented legacy-2005 and BACKCAST naming conventions."""
+
+    source = str(source_run).strip()
+    action = str(action).strip().lower()
+    if not source:
+        raise ValueError("Source run name cannot be blank")
+    if action not in TRANSITION_ACTIONS:
+        raise ValueError(f"Unknown transition action: {action!r}")
+    source_year_text = str(int(source_year))
+    target_year_text = str(int(target_year))
+    token = re.compile(rf"(?<!\d){re.escape(source_year_text)}(?!\d)")
+    matches = list(token.finditer(source))
+    if len(matches) > 1:
+        raise ValueError(
+            f"Run name {source!r} contains multiple {source_year_text} tokens; "
+            "enter its target name explicitly in Excel."
+        )
+
+    if action == "continuation":
+        if matches:
+            return token.sub(target_year_text, source, count=1)
+        return f"{source}_{target_year_text}"
+
+    base = token.sub("", source, count=1) if matches else source
+    base = re.sub(r"_+", "_", base).strip("_")
+    return f"{base}_BACKCAST_{target_year_text}"
+
+
+def planned_transition_additions(
+    source_runs: Sequence[str],
+    *,
+    action: str,
+    source_year: int,
+    target_year: int,
+    archive: pd.DataFrame,
+    existing_plan: pd.DataFrame,
+    run_column: str = "Run Name",
+    year_column: str = "dstart_year",
+) -> pd.DataFrame:
+    """Return only new Excel rows required for selections made this run."""
+
+    selected = [str(value).strip() for value in source_runs if str(value).strip()]
+    if len(selected) != len(set(selected)):
+        raise ValueError("The current transition selection contains duplicate source runs")
+    if not selected:
+        return pd.DataFrame(columns=TRANSITION_COLUMNS)
+    if run_column not in archive or year_column not in archive:
+        raise ValueError(f"Archive must contain {run_column!r} and {year_column!r}")
+
+    archive_names = set(archive[run_column].dropna().astype(str))
+    rows: list[dict[str, Any]] = []
+    for source in selected:
+        matches = archive.loc[archive[run_column].astype(str).eq(source)]
+        if len(matches) != 1:
+            raise ValueError(f"Expected one archive row for source {source!r}; found {len(matches)}")
+        observed_year = pd.to_numeric(pd.Series([matches.iloc[0][year_column]]), errors="coerce").iloc[0]
+        if not np.isfinite(observed_year) or int(observed_year) != int(source_year):
+            raise ValueError(
+                f"Source {source!r} has station-file year {observed_year!r}, "
+                f"not configured source year {source_year}."
+            )
+        target = propose_transition_target_name(
+            source,
+            action=action,
+            source_year=source_year,
+            target_year=target_year,
+        )
+        if target in archive_names:
+            raise ValueError(f"Proposed target run {target!r} already exists in the archive")
+        if not existing_plan.empty:
+            same_mapping = (
+                existing_plan["Action"].eq(action)
+                & existing_plan["Source Run"].eq(source)
+                & existing_plan["Target Run"].eq(target)
+                & existing_plan["Source Year"].eq(int(source_year))
+                & existing_plan["Target Year"].eq(int(target_year))
+            )
+            if same_mapping.any():
+                continue
+            if existing_plan["Target Run"].eq(target).any():
+                raise ValueError(f"Target run {target!r} is already assigned to another transition")
+        rows.append(
+            {
+                "Action": action,
+                "Source Run": source,
+                "Target Run": target,
+                "Source Year": int(source_year),
+                "Target Year": int(target_year),
+                "Status": "planned",
+                "Notes": "",
+            }
+        )
+    return pd.DataFrame(rows, columns=TRANSITION_COLUMNS)
+
+
+def _option_enabled(value: Any) -> bool:
+    """Interpret archived boolean-like CPP option values consistently."""
+
+    if pd.isna(value):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on", "enabled"}
+    return bool(value)
+
+
+def add_biological_parameter_match_groups(
+    frame: pd.DataFrame,
+    priors: pd.DataFrame,
+    *,
+    run_column: str = "Run Name",
+    year_column: str = "dstart_year",
+    significant_digits: int = 10,
+) -> pd.DataFrame:
+    """Label exact biological configurations across years using a stable signature.
+
+    All prior-listed biological parameters present in the archive participate.
+    Conditional children are represented as inactive when their parent is off.
+    Numeric values are canonicalized to a small formatting tolerance so NetCDF
+    representation noise does not split otherwise identical configurations.
+    """
+
+    required = {run_column, year_column, "parameter", "parameter_type", "parent_option"}
+    missing_frame = sorted({run_column, year_column}.difference(frame.columns))
+    missing_priors = sorted({"parameter", "parameter_type", "parent_option"}.difference(priors.columns))
+    if missing_frame or missing_priors:
+        raise ValueError(
+            f"Cannot build parameter matches; archive missing {missing_frame}, "
+            f"priors missing {missing_priors}."
+        )
+    parameter_rows = priors.loc[priors["parameter"].isin(frame.columns)].copy()
+    parameter_rows = parameter_rows.drop_duplicates("parameter", keep="last")
+
+    signatures: list[str] = []
+    completeness: list[bool] = []
+    for _, row in frame.iterrows():
+        pieces: list[tuple[str, str]] = []
+        complete = True
+        for prior in parameter_rows.itertuples(index=False):
+            parameter = str(prior.parameter)
+            parent = str(prior.parent_option).strip() if pd.notna(prior.parent_option) else ""
+            if parent and parent in row.index and not _option_enabled(row[parent]):
+                pieces.append((parameter, "<inactive>"))
+                continue
+            value = row.get(parameter, np.nan)
+            if pd.isna(value):
+                pieces.append((parameter, "<missing>"))
+                complete = False
+            elif str(prior.parameter_type) in {"float", "integer"}:
+                numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+                if not np.isfinite(numeric):
+                    pieces.append((parameter, "<missing>"))
+                    complete = False
+                else:
+                    pieces.append((parameter, format(float(numeric), f".{significant_digits}g")))
+            else:
+                pieces.append((parameter, str(value).strip().lower()))
+        signatures.append(json.dumps(pieces, separators=(",", ":")))
+        completeness.append(complete)
+
+    result = frame.copy()
+    signature_hashes = [sha256(value.encode("utf-8")).hexdigest()[:12] for value in signatures]
+    result["Parameter Match Group"] = signature_hashes
+    result["Parameter Configuration Complete"] = completeness
+    group_sizes = result.groupby("Parameter Match Group")[run_column].transform("size")
+    year_counts = result.groupby("Parameter Match Group")[year_column].transform(
+        lambda values: pd.to_numeric(values, errors="coerce").dropna().nunique()
+    )
+    result["Parameter Match Group Size"] = group_sizes.astype(int)
+    result["Cross-Year Parameter Match"] = year_counts.gt(1)
+    return result
+
+
+def model_year_summary(
+    frame: pd.DataFrame,
+    *,
+    year_column: str = "dstart_year",
+    objective_columns: Sequence[str] = ("Cost", "Bottom pH Objective"),
+) -> pd.DataFrame:
+    """Summarize usable pooled evidence by model year without making year tunable."""
+
+    rows: list[dict[str, Any]] = []
+    years = pd.to_numeric(frame.get(year_column), errors="coerce")
+    for year in sorted(years.dropna().astype(int).unique()):
+        selected = frame.loc[years.eq(year)]
+        row: dict[str, Any] = {"Model Year": year, "Runs": len(selected)}
+        for objective in objective_columns:
+            values = pd.to_numeric(selected.get(objective), errors="coerce")
+            row[f"Usable {objective}"] = int(values.notna().sum())
+            row[f"Median {objective}"] = values.median()
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def matched_year_comparisons(
+    frame: pd.DataFrame,
+    *,
+    run_column: str = "Run Name",
+    year_column: str = "dstart_year",
+    objective_columns: Sequence[str] = ("Cost", "Bottom pH Objective"),
+) -> pd.DataFrame:
+    """Return pairwise objective displacement for cross-year parameter matches."""
+
+    required = {
+        run_column,
+        year_column,
+        "Parameter Match Group",
+        "Cross-Year Parameter Match",
+        *objective_columns,
+    }
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"Matched-year comparison is missing columns: {missing}")
+    rows: list[dict[str, Any]] = []
+    matched = frame.loc[frame["Cross-Year Parameter Match"].fillna(False)].copy()
+    for group, members in matched.groupby("Parameter Match Group", sort=True):
+        members = members.sort_values([year_column, run_column], kind="stable")
+        for (_, first), (_, second) in combinations(members.iterrows(), 2):
+            first_year = pd.to_numeric(pd.Series([first[year_column]]), errors="coerce").iloc[0]
+            second_year = pd.to_numeric(pd.Series([second[year_column]]), errors="coerce").iloc[0]
+            if not np.isfinite(first_year) or not np.isfinite(second_year) or first_year == second_year:
+                continue
+            record: dict[str, Any] = {
+                "Parameter Match Group": group,
+                "Earlier Run": first[run_column],
+                "Earlier Year": int(first_year),
+                "Later Run": second[run_column],
+                "Later Year": int(second_year),
+            }
+            for objective in objective_columns:
+                before = pd.to_numeric(pd.Series([first[objective]]), errors="coerce").iloc[0]
+                after = pd.to_numeric(pd.Series([second[objective]]), errors="coerce").iloc[0]
+                record[f"Earlier {objective}"] = before
+                record[f"Later {objective}"] = after
+                record[f"Change in {objective}"] = after - before
+            if "Pareto Rank" in frame:
+                record["Earlier Global Pareto Rank"] = first.get("Pareto Rank")
+                record["Later Global Pareto Rank"] = second.get("Pareto Rank")
+                record["Change in Global Pareto Rank"] = (
+                    second.get("Pareto Rank") - first.get("Pareto Rank")
+                )
+            cost_change = record.get(f"Change in {objective_columns[0]}")
+            priority_change = record.get(f"Change in {objective_columns[1]}")
+            if pd.notna(cost_change) and pd.notna(priority_change):
+                if cost_change < 0 and priority_change < 0:
+                    record["Direction"] = "better in both"
+                elif cost_change > 0 and priority_change > 0:
+                    record["Direction"] = "worse in both"
+                else:
+                    record["Direction"] = "mixed/tradeoff"
+            rows.append(record)
+    return pd.DataFrame(rows)
+
+
+def continuation_recommendations(
+    frame: pd.DataFrame,
+    priors: pd.DataFrame,
+    *,
+    source_year: int,
+    target_year: int,
+    maximum_pareto_rank: int,
+    objective_columns: Sequence[str] = ("Cost", "Bottom pH Objective"),
+    run_column: str = "Run Name",
+    year_column: str = "dstart_year",
+) -> pd.DataFrame:
+    """Rank strong source-year runs while favoring mixed-parameter diversity."""
+
+    required = {
+        run_column,
+        year_column,
+        "Pareto Rank",
+        "Parameter Match Group",
+        "Parameter Configuration Complete",
+        *objective_columns,
+    }
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"Continuation recommendations are missing columns: {missing}")
+    years = pd.to_numeric(frame[year_column], errors="coerce")
+    target_groups = set(frame.loc[years.eq(int(target_year)), "Parameter Match Group"])
+    eligible = frame.loc[
+        years.eq(int(source_year))
+        & pd.to_numeric(frame["Pareto Rank"], errors="coerce").le(int(maximum_pareto_rank))
+        & frame["Parameter Configuration Complete"].fillna(False)
+        & ~frame["Parameter Match Group"].isin(target_groups)
+    ].copy()
+    for objective in objective_columns:
+        eligible = eligible.loc[pd.to_numeric(eligible[objective], errors="coerce").notna()]
+    if eligible.empty:
+        return pd.DataFrame()
+
+    parameter_rows = priors.loc[priors["parameter"].isin(eligible.columns)].drop_duplicates(
+        "parameter", keep="last"
+    )
+    numeric_parameters = parameter_rows.loc[
+        parameter_rows["parameter_type"].isin(["float", "integer"]), "parameter"
+    ].tolist()
+    categorical_parameters = parameter_rows.loc[
+        parameter_rows["parameter_type"].isin(["categorical", "boolean"]), "parameter"
+    ].tolist()
+    parent_lookup = parameter_rows.set_index("parameter")["parent_option"].fillna("").to_dict()
+    numeric_ranges: dict[str, float] = {}
+    for parameter in numeric_parameters:
+        values = pd.to_numeric(eligible[parameter], errors="coerce")
+        numeric_ranges[parameter] = float(values.max() - values.min()) if values.notna().any() else 0.0
+
+    def inactive(row: pd.Series, parameter: str) -> bool:
+        parent = str(parent_lookup.get(parameter, "")).strip()
+        return bool(parent) and not _option_enabled(row.get(parent))
+
+    def distance(first: pd.Series, second: pd.Series) -> float:
+        components: list[float] = []
+        for parameter in numeric_parameters:
+            first_inactive, second_inactive = inactive(first, parameter), inactive(second, parameter)
+            if first_inactive or second_inactive:
+                components.append(0.0 if first_inactive and second_inactive else 1.0)
+                continue
+            first_value = pd.to_numeric(pd.Series([first.get(parameter)]), errors="coerce").iloc[0]
+            second_value = pd.to_numeric(pd.Series([second.get(parameter)]), errors="coerce").iloc[0]
+            if not np.isfinite(first_value) or not np.isfinite(second_value):
+                components.append(1.0)
+                continue
+            scale = numeric_ranges[parameter]
+            components.append(0.0 if scale == 0 else min(1.0, abs(first_value - second_value) / scale))
+        for parameter in categorical_parameters:
+            first_inactive, second_inactive = inactive(first, parameter), inactive(second, parameter)
+            if first_inactive or second_inactive:
+                components.append(0.0 if first_inactive and second_inactive else 1.0)
+            else:
+                components.append(
+                    0.0 if str(first.get(parameter)).strip().lower() == str(second.get(parameter)).strip().lower() else 1.0
+                )
+        return float(np.mean(components)) if components else 0.0
+
+    normalized_objectives = []
+    for objective in objective_columns:
+        values = pd.to_numeric(eligible[objective], errors="coerce")
+        span = values.max() - values.min()
+        normalized_objectives.append(
+            pd.Series(0.0, index=eligible.index) if span == 0 else (values - values.min()) / span
+        )
+    eligible["Balanced Objective Score"] = sum(normalized_objectives) / len(normalized_objectives)
+
+    remaining = set(eligible.index)
+    selected: list[Any] = []
+    nearest_distances: dict[Any, float] = {}
+    while remaining:
+        best_rank = min(int(eligible.at[index, "Pareto Rank"]) for index in remaining)
+        tier = [index for index in remaining if int(eligible.at[index, "Pareto Rank"]) == best_rank]
+        if not selected:
+            chosen = min(tier, key=lambda index: (eligible.at[index, "Balanced Objective Score"], str(eligible.at[index, run_column])))
+            nearest_distances[chosen] = np.nan
+        else:
+            distances = {
+                index: min(distance(eligible.loc[index], eligible.loc[chosen_index]) for chosen_index in selected)
+                for index in tier
+            }
+            chosen = min(
+                tier,
+                key=lambda index: (
+                    -distances[index],
+                    eligible.at[index, "Balanced Objective Score"],
+                    str(eligible.at[index, run_column]),
+                ),
+            )
+            nearest_distances[chosen] = distances[chosen]
+        selected.append(chosen)
+        remaining.remove(chosen)
+
+    ranked = eligible.loc[selected].copy()
+    ranked.insert(0, "Continuation Priority", range(1, len(ranked) + 1))
+    ranked["Distance from Earlier Suggestions"] = [nearest_distances[index] for index in selected]
+    ranked["Diversity Assessment"] = ranked["Distance from Earlier Suggestions"].map(
+        lambda value: "first suggestion"
+        if pd.isna(value)
+        else ("distinct" if value >= 0.25 else ("moderately distinct" if value >= 0.10 else "similar/redundant"))
+    )
+    ranked["Existing Target-Year Match"] = False
+    columns = [
+        "Continuation Priority",
+        run_column,
+        year_column,
+        "Pareto Rank",
+        *objective_columns,
+        "Balanced Objective Score",
+        "Distance from Earlier Suggestions",
+        "Diversity Assessment",
+        "Parameter Match Group",
+        "Existing Target-Year Match",
+    ]
+    return ranked[[column for column in columns if column in ranked]].reset_index(drop=True)
+
+
+def transition_candidate_table(
+    plan: pd.DataFrame,
+    archive: pd.DataFrame,
+    *,
+    action: str,
+    source_year: int,
+    target_year: int,
+    parameters_to_copy: Sequence[str],
+    run_column: str = "Run Name",
+    year_column: str = "dstart_year",
+) -> pd.DataFrame:
+    """Resolve planned transitions to exact archived biological configurations."""
+
+    action = str(action).strip().lower()
+    selected = plan.loc[
+        plan["Action"].eq(action)
+        & plan["Source Year"].eq(int(source_year))
+        & plan["Target Year"].eq(int(target_year))
+        & plan["Status"].eq("planned")
+    ].copy()
+    if selected.empty:
+        return pd.DataFrame()
+    archive_names = set(archive[run_column].dropna().astype(str))
+    copy_parameters = list(dict.fromkeys(parameters_to_copy))
+    rows: list[dict[str, Any]] = []
+    problems: list[str] = []
+    for _, transition in selected.iterrows():
+        source = str(transition["Source Run"])
+        target = str(transition["Target Run"])
+        source_rows = archive.loc[archive[run_column].astype(str).eq(source)]
+        if len(source_rows) != 1:
+            problems.append(f"{source}: expected one archive row; found {len(source_rows)}")
+            continue
+        if target in archive_names:
+            problems.append(f"{target}: target already exists in the archive")
+            continue
+        source_row = source_rows.iloc[0]
+        observed_year = pd.to_numeric(pd.Series([source_row.get(year_column)]), errors="coerce").iloc[0]
+        if not np.isfinite(observed_year) or int(observed_year) != int(source_year):
+            problems.append(
+                f"{source}: station-file year {observed_year!r} does not match {source_year}"
+            )
+            continue
+        missing_parameters = [
+            parameter
+            for parameter in copy_parameters
+            if parameter not in source_row.index or pd.isna(source_row[parameter])
+        ]
+        if missing_parameters:
+            problems.append(
+                f"{source}: missing parameters required for exact reproduction: "
+                + ", ".join(missing_parameters)
+            )
+            continue
+        record = {
+            "Run Name": target,
+            "Trial Number": -1,
+            "Source Run": source,
+            "Source Year": int(source_year),
+            "Target Year": int(target_year),
+            "Transition Action": action,
+        }
+        record.update({parameter: source_row[parameter] for parameter in copy_parameters})
+        rows.append(record)
+    if problems:
+        raise ValueError("Transition inputs were not written:\n- " + "\n- ".join(problems))
+    return pd.DataFrame(rows)
+
+
+def build_transition_manifest(
+    transitions: pd.DataFrame,
+    written_files: pd.DataFrame,
+    *,
+    action: str,
+) -> pd.DataFrame:
+    """Build complete provenance for generated continuation/backcast files."""
+
+    action = str(action).strip().lower()
+    manifest = transitions.merge(written_files, on="Run Name", how="left", validate="one_to_one")
+    manifest.insert(0, "Generated UTC", utc_now_text())
+    manifest["Initialization Policy"] = (
+        "matched_continuation" if action == "continuation" else "standard_target_year_initialization"
+    )
+    manifest["Initialization Source Run"] = (
+        manifest["Source Run"] if action == "continuation" else "manual standard initial conditions"
+    )
+    manifest["Optics SHA256"] = manifest["Optics File"].map(file_sha256)
+    manifest["Sediment SHA256"] = manifest["Sediment File"].map(file_sha256)
+    return manifest
+
+
+def append_transition_manifest(
+    new_records: pd.DataFrame,
+    output_file: Path | str,
+    *,
+    overwrite: bool = False,
+) -> pd.DataFrame:
+    """Append immutable target-run transition records to a durable manifest."""
+
+    output = Path(output_file)
+    if output.is_file():
+        existing = pd.read_csv(output)
+    else:
+        existing = pd.DataFrame(columns=new_records.columns)
+    combined = existing.copy()
+    additions: list[dict[str, Any]] = []
+    for _, row in new_records.iterrows():
+        target = str(row["Run Name"])
+        old = existing.loc[existing.get("Run Name", pd.Series(dtype=str)).astype(str).eq(target)]
+        if not old.empty:
+            if overwrite:
+                combined = combined.loc[~combined["Run Name"].astype(str).eq(target)]
+                additions.append(row.to_dict())
+                continue
+            common = [column for column in new_records.columns if column in old.columns]
+            conflicts = [
+                column
+                for column in common
+                if not (
+                    (pd.isna(old.iloc[0][column]) and pd.isna(row[column]))
+                    or str(old.iloc[0][column]) == str(row[column])
+                )
+            ]
+            if conflicts:
+                raise ValueError(f"Transition manifest conflict for {target!r}: {conflicts}")
+            continue
+        additions.append(row.to_dict())
+    if additions:
+        combined = pd.concat([combined, pd.DataFrame(additions)], ignore_index=True)
+    if additions or not output.is_file():
+        atomic_write_csv(combined, output, index=False)
+    return combined
 
 
 # ---------------------------------------------------------------------------
@@ -2049,6 +2760,9 @@ def import_historical_multiobjective_trials(
                 if run_name.startswith(previous_optimizer_prefix)
                 else "Historical archive"
             )
+            model_year = pd.to_numeric(
+                pd.Series([row.get("dstart_year")]), errors="coerce"
+            ).iloc[0]
             trial = optuna.trial.create_trial(
                 params=params,
                 distributions=distributions,
@@ -2061,6 +2775,7 @@ def import_historical_multiobjective_trials(
                     "Objective Version": objective_version,
                     "Station Run Date": station_date_text,
                     "Station Date Is Fallback": bool(row.get("Station Date Is Fallback", pd.isna(station_date))),
+                    "Model Year": int(model_year) if np.isfinite(model_year) else None,
                     "Imported UTC": imported_utc,
                 },
             )
@@ -2086,6 +2801,8 @@ def ask_candidate_trials(
     count: int,
     run_name_prefix: str,
     objective_version: str,
+    run_name_suffix: str = "",
+    trial_user_attrs: Mapping[str, Any] | None = None,
 ) -> pd.DataFrame:
     """Create explicit RUNNING trials and return their proposed parameters."""
 
@@ -2099,10 +2816,12 @@ def ask_candidate_trials(
     rows: list[dict[str, Any]] = []
     for _ in range(int(count)):
         trial = study.ask()
-        run_name = f"{run_name_prefix}{trial.number}"
+        run_name = f"{run_name_prefix}{trial.number}{run_name_suffix}"
         trial.set_user_attr("Run Name", run_name)
         trial.set_user_attr("Origin", "Multi-objective TPE")
         trial.set_user_attr("Objective Version", objective_version)
+        for key, value in (trial_user_attrs or {}).items():
+            trial.set_user_attr(str(key), value)
         params = {
             parameter: trial.suggest_float(parameter, float(bounds[0]), float(bounds[1]))
             for parameter, bounds in numeric_bounds.items()
@@ -2128,6 +2847,7 @@ def build_complete_candidate_summary(
     sampler_name: str,
     fixed_values: Mapping[str, Any],
     priors: pd.DataFrame,
+    candidate_metadata: Mapping[str, Any] | None = None,
 ) -> pd.DataFrame:
     """Add complete resolved-input and study provenance to a candidate batch.
 
@@ -2173,6 +2893,7 @@ def build_complete_candidate_summary(
         "Fixed/Baseline Parameters": "; ".join(sorted(resolved_fixed)),
         "Candidate Summary Version": "mo_bio_complete_v1",
     }
+    metadata.update(dict(candidate_metadata or {}))
     insertion_point = 2
     for column, value in metadata.items():
         summary.insert(insertion_point, column, value)
@@ -2327,7 +3048,21 @@ def synchronize_running_trials(
             live = optuna.trial.Trial(study, frozen._trial_id)
             live.set_user_attr("Study Run Name", study_run_name)
             live.set_user_attr("Actual Run Name", actual_run_name)
-            live.set_user_attr("Station Run Date", row.get("Station Run Date"))
+            # Optuna persists user attributes as JSON. Pandas Timestamp objects
+            # must therefore be reduced to a stable string before storage.
+            station_date = pd.to_datetime(
+                row.get("Station Run Date"),
+                errors="coerce",
+            )
+            station_date_text = (
+                station_date.date().isoformat() if pd.notna(station_date) else None
+            )
+            live.set_user_attr("Station Run Date", station_date_text)
+            model_year = pd.to_numeric(
+                pd.Series([row.get("dstart_year")]), errors="coerce"
+            ).iloc[0]
+            if np.isfinite(model_year):
+                live.set_user_attr("Model Year", int(model_year))
             study.tell(frozen.number, [float(values[0]), float(values[1])])
             status = "completed"
         records.append(
@@ -2406,11 +3141,26 @@ def tpe_distribution_samples(
     return externalize(below_raw), externalize(above_raw), metadata
 
 
-def trial_provenance_table(study: Any) -> pd.DataFrame:
-    """Return explicit provenance and timing for every stored Optuna trial."""
+def trial_provenance_table(
+    study: Any,
+    archive: pd.DataFrame | None = None,
+    *,
+    run_column: str = "Run Name",
+    year_column: str = "dstart_year",
+) -> pd.DataFrame:
+    """Return trial provenance, resolving legacy model years from the archive."""
 
+    archived_years: dict[str, int] = {}
+    if archive is not None and run_column in archive and year_column in archive:
+        for _, row in archive.drop_duplicates(run_column, keep="last").iterrows():
+            year = pd.to_numeric(pd.Series([row.get(year_column)]), errors="coerce").iloc[0]
+            if np.isfinite(year):
+                archived_years[str(row[run_column])] = int(year)
     rows: list[dict[str, Any]] = []
     for trial in study.trials:
+        run_name = trial.user_attrs.get("Actual Run Name", trial.user_attrs.get("Run Name"))
+        stored_year = trial.user_attrs.get("Model Year")
+        resolved_year = stored_year if stored_year is not None else archived_years.get(str(run_name))
         rows.append(
             {
                 "Trial Number": trial.number,
@@ -2418,6 +3168,17 @@ def trial_provenance_table(study: Any) -> pd.DataFrame:
                 "Run Name": trial.user_attrs.get("Run Name"),
                 "Actual Run Name": trial.user_attrs.get("Actual Run Name"),
                 "Origin": trial.user_attrs.get("Origin", trial.user_attrs.get("Source")),
+                "Model Year": resolved_year,
+                "Model Year Source": (
+                    "Optuna metadata"
+                    if stored_year is not None
+                    else ("Archive lookup" if resolved_year is not None else "Unavailable")
+                ),
+                "Candidate Target Year": trial.user_attrs.get("Candidate Target Year"),
+                "Initialization Policy": trial.user_attrs.get("Initialization Policy"),
+                "Initialization Source Run": trial.user_attrs.get("Initialization Source Run"),
+                "Candidate Batch ID": trial.user_attrs.get("Candidate Batch ID"),
+                "Anchor Version": trial.user_attrs.get("Anchor Version"),
                 "Station Run Date": trial.user_attrs.get("Station Run Date"),
                 "Station Date Is Fallback": trial.user_attrs.get("Station Date Is Fallback"),
                 "Imported UTC": trial.user_attrs.get("Imported UTC"),

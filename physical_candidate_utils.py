@@ -20,6 +20,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
+import gsw
 from netCDF4 import Dataset
 
 
@@ -36,6 +37,13 @@ COST_COMPONENT_COLUMNS = [
     "Surface Salinity Cost",
     "Bottom Salinity Cost",
 ]
+STRATIFICATION_SOURCE_VARIABLES = (
+    "temp_obs",
+    "temp_mod",
+    "salt_obs",
+    "salt_mod",
+)
+STRATIFICATION_METRICS = ("density", "salinity", "temperature")
 
 
 @dataclass(frozen=True)
@@ -54,6 +62,14 @@ class WorkflowPaths:
     @property
     def candidate_directory(self) -> Path:
         return self.output_root / "candidates"
+
+    @property
+    def best_run_directory(self) -> Path:
+        return self.output_root / "best_run"
+
+    @property
+    def best_run_setup_file(self) -> Path:
+        return self.best_run_directory / "physical_best_run_full_setup.csv"
 
     @property
     def provenance_directory(self) -> Path:
@@ -84,6 +100,10 @@ class WorkflowPaths:
         return self.quality_directory / "physical_data_quality_issues.csv"
 
     @property
+    def stratification_issues_file(self) -> Path:
+        return self.quality_directory / "physical_stratification_issues.csv"
+
+    @property
     def run_map_file(self) -> Path:
         return self.provenance_directory / "physical_candidate_run_map.csv"
 
@@ -106,6 +126,7 @@ def ensure_output_layout(paths: WorkflowPaths) -> None:
     for directory in (
         paths.audit_directory,
         paths.candidate_directory,
+        paths.best_run_directory,
         paths.provenance_directory,
         paths.quality_directory,
         paths.figure_directory,
@@ -170,6 +191,7 @@ def validate_physical_spec(spec: Mapping[str, Any]) -> None:
         "mixing_orientation",
         "mass_conservation_bundle",
         "optional_cpp_options",
+        "stratification",
     }
     missing = sorted(required_sections.difference(spec))
     if missing:
@@ -226,6 +248,38 @@ def validate_physical_spec(spec: Mapping[str, Any]) -> None:
             raise ValueError(f"Optional combination {name!r} contains an untracked option.")
         combination_names.append(name)
 
+    stratification = spec["stratification"]
+    if stratification.get("role") != "diagnostic":
+        raise ValueError(
+            "stratification.role must remain 'diagnostic' for this objective version."
+        )
+    minimum_pairs = stratification.get("minimum_paired_days")
+    if not isinstance(minimum_pairs, int) or minimum_pairs < 2:
+        raise ValueError("stratification.minimum_paired_days must be an integer >= 2.")
+    start = stratification.get("warm_season_start_day")
+    end = stratification.get("warm_season_end_day")
+    if not isinstance(start, int) or not isinstance(end, int) or not 1 <= start <= end <= 366:
+        raise ValueError(
+            "Stratification warm-season day bounds must satisfy 1 <= start <= end <= 366."
+        )
+    station_order = stratification.get("station_order", [])
+    if not isinstance(station_order, list) or not station_order:
+        raise ValueError("stratification.station_order must be a nonempty list.")
+    cleaned_order = [str(station).strip() for station in station_order]
+    if any(not station for station in cleaned_order) or len(cleaned_order) != len(set(cleaned_order)):
+        raise ValueError("stratification.station_order contains blank or duplicate stations.")
+    station_groups = stratification.get("station_groups", {})
+    if not isinstance(station_groups, dict) or not station_groups:
+        raise ValueError("stratification.station_groups must define at least one group.")
+    for name, stations in station_groups.items():
+        if not name or not isinstance(stations, list) or not stations:
+            raise ValueError(f"Stratification station group {name!r} must be a nonempty list.")
+        cleaned = [str(station).strip() for station in stations]
+        if any(not station for station in cleaned) or len(cleaned) != len(set(cleaned)):
+            raise ValueError(
+                f"Stratification station group {name!r} contains blank or duplicate stations."
+            )
+
 
 def candidate_generation_blockers(spec: Mapping[str, Any]) -> list[str]:
     """Return unresolved review items that must block candidate creation."""
@@ -247,7 +301,10 @@ def candidate_generation_blockers(spec: Mapping[str, Any]) -> list[str]:
 def scientific_spec_fingerprint(spec: Mapping[str, Any]) -> str:
     """Hash parsed scientific content; comments and file location do not matter."""
 
-    content = {key: value for key, value in spec.items() if not key.startswith("_")}
+    content = {
+        key: value for key, value in spec.items()
+        if not key.startswith("_") and key != "stratification"
+    }
     encoded = json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
     return sha256(encoded).hexdigest()
 
@@ -372,6 +429,310 @@ def _cost_values(cost_path: Path) -> dict[str, float]:
         }
     values["Cost"] = float(sum(values.values()))
     return values
+
+
+def _netcdf_strings(variable: Any) -> list[str]:
+    """Decode a one-dimensional NetCDF string or character variable."""
+
+    values = variable[:]
+    if getattr(values, "dtype", None) is not None and values.dtype.kind == "S":
+        if values.ndim == 2:
+            return [b"".join(row).decode().strip() for row in values]
+        return [value.decode().strip() for value in values.tolist()]
+    return [str(value).strip() for value in values.tolist()]
+
+
+def _stratification_array(dataset: Dataset, name: str) -> np.ndarray:
+    """Return a source variable in Site, Depth, Day order."""
+
+    variable = dataset.variables[name]
+    required_dimensions = ("Site", "Depth", "Day")
+    if set(variable.dimensions) != set(required_dimensions) or variable.ndim != 3:
+        raise ValueError(
+            f"{name} dimensions are {variable.dimensions}; expected Site, Depth, Day."
+        )
+    order = tuple(variable.dimensions.index(dimension) for dimension in required_dimensions)
+    values = np.ma.filled(variable[:], np.nan).astype(float)
+    return np.transpose(values, order)
+
+
+def read_stratification_timeseries(
+    cost_path: Path, run_name: str
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Read strict paired surface-bottom T/S differences from one cost file.
+
+    Potential-density anomaly uses TEOS-10 with practical salinity supplied as
+    an approximation to Absolute Salinity because the cost-summary files do not
+    retain station longitude and latitude.  The approximation is appropriate
+    for diagnostic comparison but is recorded explicitly in every output row.
+    """
+
+    issue_columns = ["run_name", "cost_file", "category", "details"]
+    try:
+        with Dataset(cost_path) as dataset:
+            missing = [
+                name for name in (*STRATIFICATION_SOURCE_VARIABLES, "Site", "Depth", "Day")
+                if name not in dataset.variables
+            ]
+            if missing:
+                raise ValueError(f"Missing required variables: {', '.join(missing)}")
+
+            sites = _netcdf_strings(dataset.variables["Site"])
+            depths = _netcdf_strings(dataset.variables["Depth"])
+            depth_lookup = {name.casefold(): index for index, name in enumerate(depths)}
+            if "surface" not in depth_lookup or "bottom" not in depth_lookup:
+                raise ValueError(
+                    f"Depth labels must include Surface and Bottom; found {depths}."
+                )
+            surface = depth_lookup["surface"]
+            bottom = depth_lookup["bottom"]
+            days = np.ma.filled(dataset.variables["Day"][:], np.nan).astype(float)
+            if days.ndim != 1:
+                raise ValueError(f"Day must be one-dimensional; found shape {days.shape}.")
+
+            temp_obs, temp_mod, salt_obs, salt_mod = (
+                _stratification_array(dataset, name)
+                for name in STRATIFICATION_SOURCE_VARIABLES
+            )
+            expected_shape = (len(sites), len(depths), len(days))
+            if any(
+                values.shape != expected_shape
+                for values in (temp_obs, temp_mod, salt_obs, salt_mod)
+            ):
+                raise ValueError(
+                    "T/S source arrays do not match the Site, Depth, and Day coordinates."
+                )
+
+            source_values = np.stack(
+                [
+                    temp_obs[:, surface, :], temp_obs[:, bottom, :],
+                    temp_mod[:, surface, :], temp_mod[:, bottom, :],
+                    salt_obs[:, surface, :], salt_obs[:, bottom, :],
+                    salt_mod[:, surface, :], salt_mod[:, bottom, :],
+                ]
+            )
+            valid = np.all(np.isfinite(source_values), axis=0)
+            valid &= salt_obs[:, surface, :] >= 0
+            valid &= salt_obs[:, bottom, :] >= 0
+            valid &= salt_mod[:, surface, :] >= 0
+            valid &= salt_mod[:, bottom, :] >= 0
+
+            obs_sigma = gsw.sigma0(
+                salt_obs, gsw.CT_from_pt(salt_obs, temp_obs)
+            )
+            mod_sigma = gsw.sigma0(
+                salt_mod, gsw.CT_from_pt(salt_mod, temp_mod)
+            )
+            values = {
+                "density_observed": obs_sigma[:, bottom, :] - obs_sigma[:, surface, :],
+                "density_modeled": mod_sigma[:, bottom, :] - mod_sigma[:, surface, :],
+                "salinity_observed": salt_obs[:, bottom, :] - salt_obs[:, surface, :],
+                "salinity_modeled": salt_mod[:, bottom, :] - salt_mod[:, surface, :],
+                "temperature_observed": temp_obs[:, surface, :] - temp_obs[:, bottom, :],
+                "temperature_modeled": temp_mod[:, surface, :] - temp_mod[:, bottom, :],
+            }
+
+            site_index, day_index = np.where(valid)
+            frame = pd.DataFrame(
+                {
+                    "Run Name": run_name,
+                    "Cost File": cost_path.name,
+                    "station": np.asarray(sites)[site_index],
+                    "day": days[day_index].astype(int),
+                    "density_method": "TEOS-10 sigma0; SP used as SA; p_ref=0 dbar",
+                    **{
+                        name: array[site_index, day_index]
+                        for name, array in values.items()
+                    },
+                }
+            )
+            return frame, pd.DataFrame(columns=issue_columns)
+    except Exception as error:
+        issue = pd.DataFrame(
+            [{
+                "run_name": run_name,
+                "cost_file": str(cost_path),
+                "category": "stratification read error",
+                "details": str(error),
+            }],
+            columns=issue_columns,
+        )
+        return pd.DataFrame(), issue
+
+
+def calculate_stratification_metrics(
+    modeled: np.ndarray, observed: np.ndarray, minimum_pairs: int = 2
+) -> dict[str, Any]:
+    """Calculate directional and normalized skill for paired values."""
+
+    modeled = np.asarray(modeled, dtype=float).ravel()
+    observed = np.asarray(observed, dtype=float).ravel()
+    valid = np.isfinite(modeled) & np.isfinite(observed)
+    modeled = modeled[valid]
+    observed = observed[valid]
+    count = int(modeled.size)
+    output: dict[str, Any] = {
+        "paired_days": count,
+        "observed_mean": np.nan,
+        "modeled_mean": np.nan,
+        "bias": np.nan,
+        "rmse": np.nan,
+        "correlation": np.nan,
+        "observed_std": np.nan,
+        "ward_cost": np.nan,
+        "status": "insufficient_pairs",
+    }
+    if count == 0:
+        return output
+    residual = modeled - observed
+    observed_std = float(np.std(observed))
+    output.update(
+        {
+            "observed_mean": float(np.mean(observed)),
+            "modeled_mean": float(np.mean(modeled)),
+            "bias": float(np.mean(residual)),
+            "rmse": float(np.sqrt(np.mean(residual**2))),
+            "observed_std": observed_std,
+        }
+    )
+    if count >= 2 and np.std(modeled) > 0 and observed_std > 0:
+        output["correlation"] = float(np.corrcoef(modeled, observed)[0, 1])
+    if observed_std > 0:
+        output["ward_cost"] = float(np.mean(residual**2) / observed_std**2)
+    else:
+        output["status"] = "nonpositive_observation_std"
+        return output
+    if count >= minimum_pairs:
+        output["status"] = "calculated"
+    return output
+
+
+def _stratification_summary_rows(
+    frame: pd.DataFrame,
+    group_columns: Sequence[str],
+    minimum_pairs: int,
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    grouped = frame.groupby(list(group_columns), sort=False, dropna=False)
+    for keys, group in grouped:
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+        identity = dict(zip(group_columns, keys))
+        for metric in STRATIFICATION_METRICS:
+            rows.append(
+                {
+                    **identity,
+                    "metric": metric,
+                    **calculate_stratification_metrics(
+                        group[f"{metric}_modeled"],
+                        group[f"{metric}_observed"],
+                        minimum_pairs=minimum_pairs,
+                    ),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def build_stratification_diagnostics(
+    archive: pd.DataFrame,
+    cost_directory: Path,
+    spec: Mapping[str, Any],
+) -> dict[str, pd.DataFrame]:
+    """Build station-first annual and warm-season stratification diagnostics."""
+
+    configuration = spec["stratification"]
+    minimum_pairs = int(configuration["minimum_paired_days"])
+    daily_frames: list[pd.DataFrame] = []
+    issue_frames: list[pd.DataFrame] = []
+    source_rows = archive[["Run Name", "Cost File"]].dropna().drop_duplicates()
+    for _, row in source_rows.iterrows():
+        daily, issues = read_stratification_timeseries(
+            cost_directory / str(row["Cost File"]), str(row["Run Name"])
+        )
+        if not daily.empty:
+            daily_frames.append(daily)
+        if not issues.empty:
+            issue_frames.append(issues)
+
+    issue_columns = ["run_name", "cost_file", "category", "details"]
+    issues = (
+        pd.concat(issue_frames, ignore_index=True)
+        if issue_frames else pd.DataFrame(columns=issue_columns)
+    )
+    if not daily_frames:
+        return {
+            "daily": pd.DataFrame(),
+            "station": pd.DataFrame(),
+            "group": pd.DataFrame(),
+            "issues": issues,
+        }
+
+    daily = pd.concat(daily_frames, ignore_index=True)
+    start = int(configuration["warm_season_start_day"])
+    end = int(configuration["warm_season_end_day"])
+    seasonal = [daily.assign(season="annual")]
+    seasonal.append(
+        daily.loc[daily["day"].between(start, end)].assign(season="may_september")
+    )
+    scoped = pd.concat(seasonal, ignore_index=True)
+    station = _stratification_summary_rows(
+        scoped, ["Run Name", "station", "season"], minimum_pairs
+    )
+
+    group_frames = []
+    groups = {
+        "all_stations": configuration["station_order"],
+        **configuration["station_groups"],
+    }
+    for group_name, stations in groups.items():
+        selected = scoped.loc[scoped["station"].isin(stations)]
+        missing = sorted(set(stations).difference(daily["station"].unique()))
+        if missing:
+            issues.loc[len(issues)] = {
+                "run_name": "<all>",
+                "cost_file": "<multiple>",
+                "category": "no valid paired station data",
+                "details": f"{group_name}: {', '.join(missing)}",
+            }
+        if selected.empty:
+            continue
+        pooled = _stratification_summary_rows(
+            selected, ["Run Name", "season"], minimum_pairs
+        )
+        pooled.insert(1, "station_group", group_name)
+        pooled.insert(2, "aggregation", "pooled_pairs")
+        group_frames.append(pooled)
+
+        eligible = station.loc[
+            station["station"].isin(stations) & station["status"].eq("calculated")
+        ]
+        rows = []
+        for (run_name, season, metric), values in eligible.groupby(
+            ["Run Name", "season", "metric"], sort=False
+        ):
+            rows.append(
+                {
+                    "Run Name": run_name,
+                    "station_group": group_name,
+                    "aggregation": "equal_station",
+                    "season": season,
+                    "metric": metric,
+                    "paired_days": int(values["paired_days"].sum()),
+                    "station_count": int(len(values)),
+                    "observed_mean": float(values["observed_mean"].mean()),
+                    "modeled_mean": float(values["modeled_mean"].mean()),
+                    "bias": float(values["bias"].mean()),
+                    "rmse": float(values["rmse"].mean()),
+                    "correlation": float(values["correlation"].mean()),
+                    "observed_std": float(values["observed_std"].mean()),
+                    "ward_cost": float(values["ward_cost"].mean()),
+                    "status": "calculated",
+                }
+            )
+        group_frames.append(pd.DataFrame(rows))
+
+    group = pd.concat(group_frames, ignore_index=True) if group_frames else pd.DataFrame()
+    return {"daily": daily, "station": station, "group": group, "issues": issues}
 
 
 def archive_fingerprint(
@@ -1225,3 +1586,19 @@ def save_audit_outputs(
     candidate_space.to_csv(
         paths.audit_directory / "physical_factorial_audit.csv", index=False
     )
+
+
+def save_stratification_outputs(
+    paths: WorkflowPaths, diagnostics: Mapping[str, pd.DataFrame]
+) -> None:
+    """Save regenerable stratification summaries and their separate QC ledger."""
+
+    diagnostics["station"].to_csv(
+        paths.audit_directory / "physical_stratification_station_summary.csv",
+        index=False,
+    )
+    diagnostics["group"].to_csv(
+        paths.audit_directory / "physical_stratification_group_summary.csv",
+        index=False,
+    )
+    diagnostics["issues"].to_csv(paths.stratification_issues_file, index=False)

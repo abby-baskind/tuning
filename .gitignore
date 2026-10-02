@@ -11,6 +11,8 @@ env/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mplconfig/
+.cache/
 .coverage
 htmlcov/
 
@@ -27,6 +29,7 @@ htmlcov/
 !CandidateParameterSetsPhysical.ipynb
 !ParameterAnalysis.ipynb
 !cost_function_v2.ipynb
+!OPTUNA_66_skill_analysis.ipynb
 
 # Local exploratory notebooks and backups retained outside version control.
 scratch.ipynb

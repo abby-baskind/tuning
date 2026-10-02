@@ -1,5 +1,6 @@
 # Minimal dependencies for the helper-module regression suite
 netCDF4
+gsw
 numpy
 optuna
 pandas

@@ -2,7 +2,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
+import numpy as np
 import pandas as pd
+from netCDF4 import Dataset
 
 import physical_candidate_utils as pcu
 
@@ -44,6 +46,65 @@ def historical_row(**overrides):
 
 
 class PhysicalCandidateUtilsTests(unittest.TestCase):
+    def test_stratification_station_group_is_authoritative(self):
+        spec = pcu.load_physical_spec(SPEC_PATH)
+        self.assertEqual(
+            spec["stratification"]["station_groups"]["upper_bay"],
+            ["PD", "BR", "CP"],
+        )
+        self.assertEqual(
+            spec["stratification"]["station_order"],
+            ["BR", "MV", "QP", "TW", "GB", "GD", "PD", "CP", "NP", "PP", "MH", "SR"],
+        )
+
+    def test_diagnostic_settings_do_not_change_candidate_fingerprint(self):
+        spec = pcu.load_physical_spec(SPEC_PATH)
+        original = pcu.scientific_spec_fingerprint(spec)
+        spec["stratification"]["station_groups"]["upper_bay"] = ["BR"]
+        self.assertEqual(pcu.scientific_spec_fingerprint(spec), original)
+
+    def test_stratification_metrics_preserve_bias_direction(self):
+        metrics = pcu.calculate_stratification_metrics(
+            np.array([1.0, 2.0, 3.0]),
+            np.array([2.0, 3.0, 4.0]),
+            minimum_pairs=3,
+        )
+        self.assertEqual(metrics["status"], "calculated")
+        self.assertAlmostEqual(metrics["bias"], -1.0)
+        self.assertAlmostEqual(metrics["rmse"], 1.0)
+        self.assertAlmostEqual(metrics["correlation"], 1.0)
+
+    def test_stratification_reader_requires_same_day_complete_pairs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cost.nc"
+            with Dataset(path, "w") as dataset:
+                dataset.createDimension("Site", 1)
+                dataset.createDimension("Depth", 2)
+                dataset.createDimension("Day", 3)
+                site = dataset.createVariable("Site", str, ("Site",))
+                depth = dataset.createVariable("Depth", str, ("Depth",))
+                day = dataset.createVariable("Day", "i4", ("Day",))
+                site[:] = np.array(["BR"], dtype=object)
+                depth[:] = np.array(["Surface", "Bottom"], dtype=object)
+                day[:] = [121, 122, 123]
+                for name in pcu.STRATIFICATION_SOURCE_VARIABLES:
+                    variable = dataset.createVariable(
+                        name, "f8", ("Site", "Depth", "Day"), fill_value=np.nan
+                    )
+                    variable[:] = np.array(
+                        [[[20.0, 21.0, 22.0], [18.0, 19.0, 20.0]]]
+                        if name.startswith("temp")
+                        else [[[25.0, 25.0, 25.0], [28.0, 28.0, 28.0]]]
+                    )
+                dataset.variables["salt_mod"][0, 0, 1] = np.nan
+
+            daily, issues = pcu.read_stratification_timeseries(path, "test_run")
+            self.assertTrue(issues.empty)
+            self.assertEqual(daily["day"].tolist(), [121, 123])
+            self.assertTrue((daily["station"] == "BR").all())
+            self.assertTrue((daily["temperature_observed"] == 2.0).all())
+            self.assertTrue((daily["salinity_observed"] == 3.0).all())
+
     def test_toml_review_blockers_match_current_review_statuses(self):
         spec = pcu.load_physical_spec(SPEC_PATH)
         blockers = pcu.candidate_generation_blockers(spec)

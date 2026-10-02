@@ -86,9 +86,19 @@ the ones a routine user should expect to review.
 | `RANDOM_SEED` | Reproducibility seed | `42` | Normally never |
 | `RUN_NONLINEAR_SCREENING` | Enables slower cross-validated screening | `True` | Runtime is inconvenient |
 | `HISTORICAL_NUMERIC_IMPORT_POLICY` | Separates historical numeric support from future candidate bounds | `"observed_support"` | Only for a deliberate compatibility experiment |
+| `CANDIDATE_TARGET_YEAR` | Intended model year for the next generated batch; provenance only | `2005` or `2006` | Before candidate generation |
+| `CANDIDATE_INITIALIZATION_RUN` | Earlier-year final-state source for `common_anchor`; use `None` for 2005 `common_initial_condition` | `None` or `"OPTUNA_66"` | The initialization design changes |
+| `CANDIDATE_INITIALIZATION_POLICY` | `common_initial_condition` for the standard 2005 start, or `common_anchor` for later-year screening | Year-dependent | Initialization design changes |
+| `CANDIDATE_ANCHOR_VERSION` | Immutable label for the initialization policy/version | `"initial_condition_v1"` or `"anchor_v1"` | Initialization changes |
+| `CANDIDATE_BATCH_ID` | Human-readable batch identity | User decision | Every new batch |
+| `CONTINUATION_SOURCE_YEAR`, `CONTINUATION_TARGET_YEAR` | Years used for continuation review/writing | `2005`, `2006` | Planning another transition |
+| `CONTINUATION_SOURCES_TO_PLAN` | Source runs selected from the recommendation table | `[]` | Planning continuations |
+| `BACKCAST_SOURCE_YEAR`, `BACKCAST_TARGET_YEAR` | Years used for optional reverse-year validation | `2006`, `2005` | Planning a backcast |
+| `BACKCAST_SOURCES_TO_PLAN` | Exceptional later-year runs selected for backcasting | `[]` | Planning a backcast |
 | `N_SCREENING_PARAMETERS_TO_SHOW` | Numeric-screening rows shown in concise mode | `25` | You want a shorter or longer review table |
 | `N_CONFOUNDING_PAIRS_TO_SHOW` | Confounded pairs shown outside debug mode | `15` | You want more diagnostic pairs |
 | `N_PARAMETER_DISTRIBUTIONS_TO_PLOT` | Numeric distributions drawn in Section 12 | `20` | The figure set is too short or long |
+| `OBJECTIVE_PLOT_COST_MAX` | Display-only right edge for objective plots; never filters analysis or TPE | `100` | Legitimate runs of interest are clipped |
 | `NEAR_PARETO_RANK` | Number of non-dominated layers treated as nearby evidence | `3` | Sensitivity analysis |
 | `COST_THRESHOLD` | Failure/unreasonable-cost filter | `200` | Cost policy changes |
 
@@ -100,6 +110,8 @@ the ones a routine user should expect to review.
 | `OPT_DIR` | Shared input spreadsheets used by multiple workflows |
 | `COST_DIR` | Cost-summary and station NetCDF files |
 | `FILE_LIST` | Workbook with `Run Name`, `Cost File`, and `Station File` |
+| `RUN_INVENTORY_SHEET` | Existing run inventory worksheet, explicitly `Master` |
+| `YEAR_TRANSITION_SHEET` | Manually maintained `MO-BIO Year Transitions` worksheet |
 | `PARAMETER_LIST` | CSV with a `Parameter Name` column |
 | `MO_BIO_OUTPUT_DIRECTORY` | Root for every generated or workflow-maintained MO-BIO file |
 | `OUTPUT_PATHS` | Structured MO-BIO path definitions derived from the output root |
@@ -125,7 +137,9 @@ The authoritative output root is:
 MO-BIO/
 ├── audit/
 ├── candidates/
-│   └── input_files/
+│   ├── input_files/
+│   ├── continuations/<year>/
+│   └── backcasts/<year>/
 ├── provenance/
 ├── quality_control/
 ├── figures/
@@ -141,11 +155,14 @@ Important files include:
 | `audit/mo_bio_*.csv` | Durable analysis, Pareto, screening, confounding, and readiness tables |
 | `candidates/mo_bio_candidate_summary.csv` | Cumulative complete candidate records |
 | `candidates/input_files/` | Generated optics and sediment input files |
+| `candidates/continuations/<year>/` | Forward-continuation inputs and immutable manifest |
+| `candidates/backcasts/<year>/` | Optional backcast inputs and immutable manifest |
 | `provenance/mo_bio_trial_provenance.csv` | Optuna origin, timing, state, and run identity |
 | `provenance/mo_bio_historical_import.csv` | Per-run import result and candidate-bound violations |
 | `provenance/mo_bio_historical_numeric_support.csv` | Historical support compared with hard future candidate bounds |
 | `quality_control/data_quality_issues.csv` | Generated suspicious-value log |
 | `quality_control/data_corrections.csv` | User-maintained verified corrections |
+| `figures/*.png` | Every figure displayed by the notebook when `SAVE_AUDIT_OUTPUTS=True` |
 | `cache/Model_Run_Summary_Bio.csv` | MO-BIO's independent validated cache |
 | `optuna/model_calibration_bio_cost_bottom_ph.db` | Multi-objective Optuna study |
 
@@ -176,6 +193,7 @@ categories, or sampler settings change.
 | `BASELINE_RUN_NAME` | Supplies values for inactive template parameters |
 | `REMOTE_SEDIMENT_DIRECTORY` | Path written into `BSEDPARNAM` |
 | `OVERWRITE_CANDIDATE_FILES` | Allows replacing existing generated files |
+| `OVERWRITE_TRANSITION_FILES` | Allows deliberate replacement of continuation/backcast files and manifest records |
 
 Leave overwrite disabled unless replacement is deliberate.
 
@@ -236,8 +254,14 @@ retained mainly for explicit comparison, not recommended for this study.
 The complete summary includes the official run name, trial and study identity,
 generation time, objective/search-space provenance, prior-file fingerprint,
 sampler, all active proposals, and every fixed or baseline template value. It
-also identifies applicable and inactive conditional parameters. Existing trial
+also records target model year, batch ID, common anchor, and anchor version, and
+identifies applicable and inactive conditional parameters. Existing trial
 records are never silently replaced by conflicting values.
+
+Generated runs for 2006 and later include the year in the official name. Legacy
+OPTUNA names without a year are interpreted as 2005. The inventory normalizer
+therefore maps `OPTUNA_BIO_MO_111_2005` to `OPTUNA_BIO_MO_111`, while preserving
+`OPTUNA_BIO_MO_118_2006` as `OPTUNA_BIO_MO_118_2006`.
 
 ### `register_results`
 
@@ -261,6 +285,28 @@ candidate in the PHYS run map.
 CPP-option changes are not supported by candidate generation. CACO3 remains
 excluded until executable selection, compile-time configuration, and compatible
 templates can be managed together.
+
+### `write_continuation_inputs`
+
+- Reads only `planned` continuation rows from the Excel transition worksheet.
+- Reproduces archived biological values represented by the two templates.
+- Writes under `candidates/continuations/<target year>/input_files/`.
+- Records the source run as the intended initialization source.
+- Creates no Optuna trial and does not change current priors or bounds.
+- Prints only the Excel status updates required now.
+
+### `write_backcast_inputs`
+
+- Reads only `planned` backcast rows from the Excel transition worksheet.
+- Reproduces an exceptional later-year candidate in an earlier model year.
+- Writes under `candidates/backcasts/<target year>/input_files/`.
+- Does not prematurely generate the later matched rerun. After the backcast
+  finishes, that rerun is planned as an ordinary continuation.
+- Creates no Optuna trial.
+
+Both modes leave boundary, river, meteorological forcing, simulation dates,
+initialization files, and CPP compile options to the user. Existing files are
+protected unless transition overwrite is explicitly enabled.
 
 ## 6. Cache behavior
 
@@ -521,6 +567,116 @@ The initial historical archive is evidence used to initialize TPE. It must not b
 described as trials sequentially learned by the new study. Genuine learning over
 time begins with trials whose origin is `Multi-objective TPE`.
 
+## 11A. Model years, continuations, and backcasts
+
+### Year is context, not a tuning parameter
+
+The legacy-named `dstart_year` field is decoded from the first actual
+`ocean_time` record in each station file. This matters for continuation files:
+ROMS can retain a 2005 reference epoch in `dstart` even when the records begin
+in 2006. Files without usable `ocean_time` fall back to `dstart`. The resulting
+model year is stored in future Optuna
+trial metadata and resolved from the archive for legacy completed trials. It is
+never passed to `suggest_float` or `suggest_categorical`. TPE therefore treats
+year-to-year differences as unexplained variability.
+
+Pooling is intentionally pragmatic, but it is not equal-year weighting. If most
+runs are from 2005, the fitted preference primarily reflects 2005. Additional
+years broaden the evidence gradually. A parameter configuration that appears in
+both the promising and less-promising groups because of annual variability will
+receive a weaker TPE preference.
+
+Pareto ranks are calculated globally across all years. The notebook identifies
+full biological parameter matches using all prior-listed biological settings,
+small numeric representation tolerance, exact categorical matching, and
+conditional-child applicability. Connected objective points can therefore show
+that a 2005 run is Pareto-optimal while its matching 2006 continuation is not.
+
+Section 8A separates this evidence into readable views:
+
+- The global plot shows the pooled objective context, Pareto status, cross-year match
+  rings, and earlier-to-later arrows without printing every run name over the
+  data. Runs above `OBJECTIVE_PLOT_COST_MAX` remain in every calculation; the
+  plot clips them for readability and prints the number beyond the display
+  limit inside the axes.
+- The paired-change plot uses full `earlier run → later run` labels on the row
+  axis. Green means the later objective is lower; red means it is higher.
+- The small-multiple plot gives each exact parameter configuration its own
+  panel and labels all member runs. This is the best view when multiple run
+  names share the same configuration or objective coordinates.
+
+These are sequential model years, not independent randomized replicates. Every
+year has predetermined boundary, river, and meteorological forcing. An ordinary
+2006 continuation begins from the final state of its matching 2005 run. Its
+performance change combines annual forcing, inherited state, and any other
+year-specific conditions; do not label the displacement a pure forcing effect.
+
+### Candidate initialization and common-anchor screening
+
+New 2005 TPE candidates use `common_initial_condition`. They all begin from the
+same predetermined standard 2005 initial-condition file, and
+`CANDIDATE_INITIALIZATION_RUN` must be `None`. Their official run names remain
+unsuffixed because an unsuffixed MO-BIO name denotes 2005.
+
+Brand-new 2006 TPE candidates do not have their own matching 2005 endpoint. They
+are initialized from one common, technically healthy 2005 anchor, initially
+`OPTUNA_66`. This gives a new batch the same favorable starting state and avoids
+penalizing a parameter set merely because a predecessor year ended poorly.
+
+The experiment answers how a parameter set performs in 2006 conditional on the
+chosen anchor. It does not prove that the same parameters can generate that
+state. Anchors are immutable within a batch. A newly preferred anchor applies
+only to future batches and should be connected to prior evidence with a bridge
+run when practical.
+
+### Optional BACKCAST validation
+
+An exceptional 2006 common-anchor candidate may be selected for a bonus test:
+
+1. Apply its parameters from the standard 2005 initial state in
+   `X_BACKCAST_2005`.
+2. Continue that final state into `X_BACKCAST_2006` with the same parameters.
+3. Compare `X_BACKCAST_2006` with the original common-anchor `X_2006`.
+
+Agreement supports initialization robustness. Disagreement demonstrates path
+dependence or adjustment transients. The original Optuna result is never
+overwritten; all runs later enter the pooled archive as separate observations.
+
+### Excel transition ledger
+
+`FileNames.xlsx` contains:
+
+- `Master`: the existing `Station File`, `Run Name`, and `Cost File` inventory.
+- `MO-BIO Year Transitions`: the manual forward/backcast plan.
+
+The transition sheet columns, in order, are:
+
+| Column | Meaning |
+|---|---|
+| `Action` | `continuation` or `backcast` |
+| `Source Run` | Existing archived configuration to reproduce |
+| `Target Run` | Unique new model-run identity |
+| `Source Year` | Station-file year of the source |
+| `Target Year` | Intended year for the new run |
+| `Status` | `planned`, `inputs_written`, `submitted`, `complete`, or `cancelled` |
+| `Notes` | Optional rationale or operational reminder |
+
+The notebook reads but never edits Excel. Selection lists in the control panel
+produce a table labeled with exactly the rows that need to be added now. Once
+those rows are manually recorded and saved, a write mode may process them. The
+notebook similarly prints only current status changes after files are written or
+results become available.
+
+Naming follows these rules:
+
+- An unsuffixed legacy name such as `OPTUNA_66` is assumed to be 2005.
+- `OPTUNA_66` continues as `OPTUNA_66_2006`.
+- An embedded year token is replaced in place:
+  `LHS20_2005_OLD` becomes `LHS20_2006_OLD`.
+- Backcasts preserve the original run and use a separate lineage:
+  `X_2006` becomes `X_BACKCAST_2005`, followed by `X_BACKCAST_2006`.
+- Ambiguous names require an explicit target in Excel.
+
 ## 12. Pareto interpretation
 
 A run is Pareto-optimal when no other run is at least as good on both objectives
@@ -750,6 +906,10 @@ template; do not weaken exact replacement-count checks merely to force output.
 | Legacy cache lacks enhanced diagnostics | Non-bottom-pH diagnostic absent | Fresh rebuild | Use enhanced cache thereafter |
 | Pareto front may be very small | Good-value distributions are sparse | Include near-Pareto rank | Add focused observations |
 | Candidate provenance from old studies is incomplete | Some origins inferred from names | Label inference clearly | Import original study metadata |
+| Pooled years are unequally represented | TPE reflects archive frequency, currently mostly 2005 | Show year coverage and matched sensitivity | Add representative years and matched continuations |
+| TPE has no non-tunable contextual covariates | Year and anchor effects appear as noise | Store metadata and compare matched configurations | Consider a contextual surrogate only if rankings reverse by year |
+| Common-anchor candidates inherit another parameter set's state | Early adjustment may affect performance | Use one anchor within a batch and optional BACKCAST validation | Final continuous multi-year validation |
+| Transition writer cannot set forcing, dates, restart files, or CPP options | Generated files are biological only | Follow manifest and configure year-specific files manually | Expand only when all accessory formats are managed |
 
 This table should be updated whenever a limitation is resolved or discovered.
 
@@ -763,6 +923,8 @@ Back up or commit:
 - `MO-BIO/quality_control/data_corrections.csv`
 - `MO-BIO/optuna/model_calibration_bio_cost_bottom_ph.db`
 - `MO-BIO/candidates/mo_bio_candidate_summary.csv`
+- The `MO-BIO Year Transitions` worksheet in `FileNames.xlsx`
+- Continuation and backcast manifests under `MO-BIO/candidates/`
 - PHYS run-map records connecting MO-BIO runs to PHYS candidates
 
 ### Regenerable outputs
@@ -772,7 +934,6 @@ These can be rebuilt from source data and configuration:
 - `MO-BIO/quality_control/data_quality_issues.csv`
 - Run-summary caches
 - Figures and tables
-- Candidate-summary CSV files
 - Candidate ROMS input files, provided templates and study trials are preserved
 
 ### If the notebook fails halfway through
@@ -794,6 +955,8 @@ This section is a compact architecture contract for future modifications.
 - Scientific objective mappings and weights: notebook scientific-definition cell.
 - Parameter decisions and user rationale: `parameter_priors.csv`.
 - Verified data corrections: `MO-BIO/quality_control/data_corrections.csv`.
+- Run inventory and manually authorized transitions: the `Master` and
+  `MO-BIO Year Transitions` worksheets in `FileNames.xlsx`.
 - Stable mechanics: `candidate_parameter_utils.py`.
 - Study state: the configured multi-objective SQLite database.
 - Comprehensive behavior and rationale: this guide.
@@ -818,6 +981,12 @@ Future changes must preserve these unless the user explicitly changes policy:
 13. Generated MO-BIO run names are official run names; MO-BIO does not use a
     separate run map.
 14. Old output paths are reported but never used as silent fallbacks.
+15. Model year and initialization context remain metadata, never tunable parameters.
+16. Pareto ranks remain global across model years.
+17. Existing completed trials are not rebuilt merely to add year metadata; legacy
+    years resolve by run-name lookup against the archive.
+18. Transition writers require a `planned` Excel row and never create Optuna trials.
+19. A common anchor is immutable within its recorded batch.
 
 ### 20.3 Architecture
 

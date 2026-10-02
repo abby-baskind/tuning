@@ -18,6 +18,12 @@ cost definition is preserved exactly:
 The four components are summed with equal weight. The individual components are
 retained so a low total can still be checked for an unacceptable tradeoff.
 
+PHYS also calculates station-level stratification diagnostics from completed
+cost-summary files. These diagnostics do **not** alter the objective, completed
+Optuna values, candidate generation, or automatic winner. They provide an
+independent check on whether a low surface/bottom T/S cost conceals weak or
+excessive vertical stratification.
+
 The workflow answers five questions:
 
 1. Is Upstream3–Centered4 or Akima4–Akima4 preferable?
@@ -75,6 +81,7 @@ The notebook creates these subdirectories when needed:
 ```text
 PHYS/
 ├── audit/
+├── best_run/
 ├── candidates/
 ├── provenance/
 ├── quality_control/
@@ -94,7 +101,12 @@ Important outputs are:
 | `audit/physical_varied_numeric_parameters.csv` | Numeric fields that actually varied |
 | `audit/physical_numeric_parameter_differences.csv` | Per-run differences from the latest run |
 | `audit/physical_factorial_audit.csv` | Every currently allowed candidate cell and whether it was observed exactly |
+| `audit/physical_candidate_result_ranking.csv` | Mapped PHYS candidates ranked by total physical cost |
+| `audit/physical_stratification_station_summary.csv` | Annual and warm-season T/S and density stratification skill by run and station |
+| `audit/physical_stratification_group_summary.csv` | Pooled-pair and equal-station regional summaries, including the Upper Bay |
+| `best_run/physical_best_run_full_setup.csv` | Single collaborator-ready setup for the lowest-cost mapped PHYS run |
 | `quality_control/physical_data_quality_issues.csv` | Missing, malformed, inconsistent, or suspicious source values |
+| `quality_control/physical_stratification_issues.csv` | Cost files that cannot support the stratification diagnostic and missing configured stations |
 | `quality_control/physical_data_corrections.csv` | User-verified overrides; original files remain unchanged |
 | `candidates/physical_candidate_summary.csv` | Complete settings for each requested candidate |
 | `candidates/physical_candidate_change_manifest.csv` | Manual changes required relative to the latest run |
@@ -104,6 +116,40 @@ Important outputs are:
 The cache files are implementation details and may be regenerated. The
 corrections file and run map are user-maintained provenance and must not be
 treated as disposable cache.
+
+## Station-level stratification diagnostic
+
+The diagnostic requires complete observed and modeled surface and bottom
+temperature and salinity on the same station-day. It calculates:
+
+- temperature stratification as surface minus bottom temperature;
+- salinity stratification as bottom minus surface salinity; and
+- density stratification as bottom minus surface potential-density anomaly.
+
+Density uses TEOS-10 `sigma0`. Cost-summary files do not retain station
+longitude and latitude, so practical salinity is supplied as an approximation
+to Absolute Salinity and the reference pressure is zero dbar. This limitation
+is written into the daily diagnostic data and must be resolved with an
+authoritative coordinate table before density becomes part of a formal tuning
+objective.
+
+Every metric is reported by station for the full year and for May 1 through
+September 30. The configured Upper Bay group is PD, BR, and CP. Regional tables
+contain both pooled-pair results and equal-station results; use the equal-station
+view for regional comparison because PD has more paired observations and a
+larger observed stratification range. Negative density bias indicates
+understratification and positive bias indicates overstratification.
+
+The notebook creates all-station bias/RMSE heatmaps and separate time-series and
+residual figures for every station with valid paired data. Each heatmap ends
+with an `All Stations` column calculated as an annual equal-station summary, so
+stations with more observations do not dominate it. Plot labels identify
+the advection scheme and horizontal diffusivity rather than requiring the reader
+to decode run names. A distinct colorblind-friendly palette distinguishes the
+four mapped configurations, and each metric legend reports that run's
+station-specific dimensional RMSE. Stations without valid pairs are listed
+explicitly. A run's stratification rank is shown beside its original objective
+rank, but the objective rank still controls automatic winner selection.
 
 ## Normal workflow
 
@@ -167,9 +213,11 @@ Set `workflow.candidate_strategy` in the TOML:
   single-objective TPE sampler.
 
 Changing the candidate space or strategy changes the specification fingerprint.
-Use a fresh study name/database when a previously populated study is no longer
-compatible. PHYS checks the stored fingerprint and refuses to mix incompatible
-studies.
+Use a fresh study name when generating candidates from a specification that is
+incompatible with a populated study. PHYS refuses to add those new candidates to
+the old study. Registration mode may still complete explicitly mapped trials
+that were already created under the old specification; it prints a warning and
+preserves the study's original fingerprint.
 
 ### 5. Generate candidate records
 
@@ -217,7 +265,24 @@ auditable without decoding the run name.
 Add completed run names and files to the established archive manifest. Rerun with
 `FORCE_REFRESH = True`, inspect the parsed cost and mapping, and only then enable
 the notebook’s explicit completion action. A run is never matched by guessing a
-filename; the run map is the identity bridge.
+filename; the run map is the identity bridge. A later expansion of the TOML
+candidate space does not invalidate registration of older trials. The notebook
+allows that registration with a warning, while continuing to block new
+candidates from being added to the older study.
+
+### 8. Review the best-run overview
+
+The final notebook section ranks mapped PHYS candidates by total physical cost,
+then automatically selects the winner. It writes one authoritative file:
+
+`best_run/physical_best_run_full_setup.csv`
+
+That long-format CSV contains run identity, all cost components, advection,
+mixing orientation, every relevant CPP switch, the raw CPP provenance string,
+and every parameter configured in `PhysicalParameterList.csv`, including values
+that never changed. A configured parameter absent from the station data is
+written explicitly as `MISSING`. The automatic selection cannot be overridden,
+so a file named “best run” always describes the current objective winner.
 
 ## Scientific rules encoded initially
 

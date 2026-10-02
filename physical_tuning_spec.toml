@@ -26,6 +26,28 @@
 
 schema_version = 1
 
+[stratification]
+# Stratification is an audit diagnostic only.  It does not alter the v1 PHYS
+# objective, completed Optuna values, candidate generation, or winner selection.
+enabled = true
+role = "diagnostic"
+minimum_paired_days = 20
+
+# May 1 through September 30 in a non-leap year.  Annual results are always
+# retained alongside this biologically important warm-season view.
+warm_season_start_day = 121
+warm_season_end_day = 273
+
+# Authoritative display order for station figures. Stations without enough
+# paired surface-bottom observations are reported explicitly as unavailable.
+station_order = ["BR", "MV", "QP", "TW", "GB", "GD", "PD", "CP", "NP", "PP", "MH", "SR"]
+
+# Region membership is a scientific decision.  Station-level results are always
+# retained, and regional summaries include both pooled-pair and equal-station
+# aggregations so stations with more observations cannot silently dominate.
+[stratification.station_groups]
+upper_bay = ["PD", "BR", "CP"]
+
 [workflow]
 # "component_factorial" crosses approved component levels.  Every internal
 # component is historically observed, although the cross-component combination
@@ -116,15 +138,15 @@ name = "S_UV__GEO_TS"
 uv = "MIX_S_UV"
 ts = "MIX_GEO_TS"
 
-[[mixing_orientation.approved_pairs]]
-name = "GEO_UV__ISO_TS"
-uv = "MIX_GEO_UV"
-ts = "MIX_ISO_TS"
+#[[mixing_orientation.approved_pairs]]
+#name = "GEO_UV__ISO_TS"
+#uv = "MIX_GEO_UV"
+#ts = "MIX_ISO_TS"
 
-[[mixing_orientation.approved_pairs]]
-name = "GEO_UV__GEO_TS"
-uv = "MIX_GEO_UV"
-ts = "MIX_GEO_TS"
+#[[mixing_orientation.approved_pairs]]
+#name = "GEO_UV__GEO_TS"
+#uv = "MIX_GEO_UV"
+#ts = "MIX_GEO_TS"
 
 [mass_conservation_bundle]
 # External testing established this as a hard future-candidate requirement.
@@ -148,15 +170,14 @@ review_status = "approved"
 name = "none"
 enabled = []
 
-[[optional_cpp_options.approved_combinations]]
-name = "KANTHA_CLAYSON_only"
-enabled = ["KANTHA_CLAYSON"]
+#[[optional_cpp_options.approved_combinations]]
+#name = "KANTHA_CLAYSON_only"
+#enabled = ["KANTHA_CLAYSON"]
 
-[[optional_cpp_options.approved_combinations]]
-name = "CANUTO_A_only"
-enabled = ["CANUTO_A"]
+#[[optional_cpp_options.approved_combinations]]
+#name = "CANUTO_A_only"
+#enabled = ["CANUTO_A"]
 
-[[optional_cpp_options.approved_combinations]]
-name = "KANTHA_CLAYSON_and_CRAIG_BANNER"
-enabled = ["KANTHA_CLAYSON", "CRAIG_BANNER"]
-
+#[[optional_cpp_options.approved_combinations]]
+#name = "KANTHA_CLAYSON_and_CRAIG_BANNER"
+#enabled = ["KANTHA_CLAYSON", "CRAIG_BANNER"]
