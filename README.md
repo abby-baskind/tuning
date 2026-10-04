@@ -16,6 +16,8 @@ against those local archives.
 | Workflow | Entry point | Supporting files |
 |---|---|---|
 | Multi-objective biological tuning | `CandidateParameterSetsBio_MultiObjectiveTPE.ipynb` | `candidate_parameter_utils.py`, `parameter_priors.csv`, `MULTIOBJECTIVE_TPE_GUIDE.md` |
+| Canonical biological objective audit | `canonical_mo_bio.py` | `canonical_mo_bio_components.csv`, `CANONICAL_MO_BIO_GUIDE.md` |
+| Canonical multi-objective biological tuning | `CandidateParameterSetsBio_Canonical.ipynb` | `canonical_mo_bio.py`, `canonical_plotting.py`, `candidate_parameter_utils.py`, `canonical_parameter_priors.csv` |
 | Constrained physical tuning | `CandidateParameterSetsPhysical.ipynb` | `physical_candidate_utils.py`, `physical_tuning_spec.toml`, `PHYSICAL_TUNING_GUIDE.md` |
 | Cost calculation | `cost_function_v2.ipynb` | `run_cost_batch.sh`, `cost_runs.csv`, `cost_analysis_history.csv` |
 | Multi-year model skill | `OPTUNA_66_skill_analysis.ipynb` | `model_skill_metrics.py`, `skill_priority_weights.csv` |
@@ -104,6 +106,7 @@ from user-maintained scientific decisions and provenance.
 ## Documentation
 
 - [Multi-objective biological tuning guide](MULTIOBJECTIVE_TPE_GUIDE.md)
+- [Canonical MO-BIO audit and study guide](CANONICAL_MO_BIO_GUIDE.md)
 - [Physical tuning guide](PHYSICAL_TUNING_GUIDE.md)
 
 ## Status

@@ -1053,6 +1053,75 @@ def replace_advection_block(
     return "".join(lines)
 
 
+def validate_advection_block(
+    text: str,
+    keyword: str,
+    expected_code: str,
+    expected_values: int,
+) -> int:
+    """Validate every tracer entry in one ROMS advection block."""
+
+    lines = text.splitlines()
+    starts = [
+        index
+        for index, line in enumerate(lines)
+        if re.match(rf"^\s*{re.escape(keyword)}\s*==", line)
+    ]
+    if len(starts) != 1:
+        raise ValueError(f"{keyword} had {len(starts)} active blocks")
+    start = starts[0]
+    validated = 0
+    for offset in range(expected_values):
+        index = start + offset
+        if index >= len(lines):
+            raise ValueError(f"{keyword} ended before value {offset + 1}")
+        pattern = (
+            rf"^\s*{re.escape(keyword)}\s*==\s*(\S+)"
+            if offset == 0
+            else r"^\s*(\S+)"
+        )
+        match = re.match(pattern, lines[index])
+        actual = match.group(1) if match else None
+        tracer_label = f"idbio({offset + 1:2d})"
+        if actual != expected_code or tracer_label not in lines[index]:
+            raise ValueError(
+                f"{keyword} tracer {offset + 1} expected {expected_code!r}; "
+                f"found {actual!r}"
+            )
+        validated += 1
+    return validated
+
+
+def validate_biological_advection_texts(
+    optics_texts: Mapping[str, str],
+    *,
+    horizontal_code: str,
+    vertical_code: str,
+    biological_tracer_count: int,
+) -> pd.DataFrame:
+    """Fail unless every generated biological input uses one required H/V pair."""
+
+    records: list[dict[str, Any]] = []
+    for run_name, text in optics_texts.items():
+        horizontal_count = validate_advection_block(
+            text, "Hadvection", horizontal_code, biological_tracer_count
+        )
+        vertical_count = validate_advection_block(
+            text, "Vadvection", vertical_code, biological_tracer_count
+        )
+        records.append(
+            {
+                "Run Name": str(run_name),
+                "Horizontal Code": horizontal_code,
+                "Horizontal Tracers Validated": horizontal_count,
+                "Vertical Code": vertical_code,
+                "Vertical Tracers Validated": vertical_count,
+                "Biological Advection Validation": "passed",
+            }
+        )
+    return pd.DataFrame(records)
+
+
 def build_candidate_input_texts(
     candidates: pd.DataFrame,
     *,

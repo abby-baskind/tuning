@@ -26,6 +26,7 @@ htmlcov/
 !CandidateParameterSets.ipynb
 !CandidateParameterSetsBio.ipynb
 !CandidateParameterSetsBio_MultiObjectiveTPE.ipynb
+!CandidateParameterSetsBio_Canonical.ipynb
 !CandidateParameterSetsPhysical.ipynb
 !ParameterAnalysis.ipynb
 !cost_function_v2.ipynb

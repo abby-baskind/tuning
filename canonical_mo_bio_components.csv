@@ -1,0 +1,19 @@
+component,label,source,model_variable,observation_variable,depth,weight,error_mode,error_value,include_in_total,bottom_ph_objective,required
+surface_ph,Surface pH,NBFSMN,pH_mod,pH_obs,Surface,2,absolute,0.1,true,false,true
+bottom_ph,Bottom pH,NBFSMN,pH_mod,pH_obs,Bottom,2,absolute,0.1,true,true,true
+surface_oxygen,Surface Oxygen,NBFSMN,oxygen_mod,oxygen_obs,Surface,2,absolute,3.125,true,false,true
+bottom_oxygen,Bottom Oxygen,NBFSMN,oxygen_mod,oxygen_obs,Bottom,2,absolute,3.125,true,false,true
+surface_no3,Surface NO3,PLT,NO3_mod,NO3_obs,Surface,1,absolute,0.1,true,false,true
+bottom_no3,Bottom NO3,PLT,NO3_mod,NO3_obs,Bottom,1,absolute,0.1,true,false,true
+surface_nh4,Surface NH4,PLT,NH4_mod,NH4_obs,Surface,1,absolute,0.1,true,false,true
+bottom_nh4,Bottom NH4,PLT,NH4_mod,NH4_obs,Bottom,1,absolute,0.1,true,false,true
+surface_si,Surface Si,PLT,Si_mod,Si_obs,Surface,1,absolute,0.1,true,false,true
+bottom_si,Bottom Si,PLT,Si_mod,Si_obs,Bottom,1,absolute,0.1,true,false,true
+secchi_depth,Secchi Depth,PLT Secchi,SD_mod,SD_obs,,1,absolute,0.2,true,false,true
+sod,Sediment Oxygen Flux,Benthic,sed_o2_mod,sed_o2_obs,,1,mean_fraction,1.0,true,false,true
+chrp_surface_no3,CHRP Surface NO3,CHRP,NO3_chrp_mod,NO3_chrp_obs,Surface,1,absolute,0.1,false,false,false
+chrp_bottom_no3,CHRP Bottom NO3,CHRP,NO3_chrp_mod,NO3_chrp_obs,Bottom,1,absolute,0.1,false,false,false
+chrp_surface_nh4,CHRP Surface NH4,CHRP,NH4_chrp_mod,NH4_chrp_obs,Surface,1,absolute,0.1,false,false,false
+chrp_bottom_nh4,CHRP Bottom NH4,CHRP,NH4_chrp_mod,NH4_chrp_obs,Bottom,1,absolute,0.1,false,false,false
+chrp_surface_si,CHRP Surface Si,CHRP,Si_chrp_mod,Si_chrp_obs,Surface,1,absolute,0.1,false,false,false
+chrp_bottom_si,CHRP Bottom Si,CHRP,Si_chrp_mod,Si_chrp_obs,Bottom,1,absolute,0.1,false,false,false

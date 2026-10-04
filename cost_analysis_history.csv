@@ -138,3 +138,5 @@ runname,station_file,cost_file,analysis_date_utc,runyear,mode,status,batch_id
 "LHS_7a_2006","/Users/akbaskind/Desktop/COST_FILES/ocean_sta_LHS_7a_2006.nc","/Users/akbaskind/Desktop/COST_FILES/LHS_7a_2006.nc","2026-09-29T11:54:02Z","2006","production","success","20260929T114848Z"
 "OPTUNA_66_2006","/Users/akbaskind/Desktop/COST_FILES/ocean_sta_OPTUNA_66_2006.nc","/Users/akbaskind/Desktop/COST_FILES/OPTUNA_66_2006.nc","2026-09-30T21:51:06Z","2006","production","success","20260930T214936Z"
 "OPTUNA_76_2006","/Users/akbaskind/Desktop/COST_FILES/ocean_sta_OPTUNA_76_2006.nc","/Users/akbaskind/Desktop/COST_FILES/OPTUNA_76_2006.nc","2026-09-30T21:52:34Z","2006","production","success","20260930T214936Z"
+"OPTUNA_66_2007","/Users/akbaskind/Desktop/COST_FILES/ocean_sta_OPTUNA_66_2007.nc","/Users/akbaskind/Desktop/COST_FILES/OPTUNA_66_2007.nc","2026-10-04T16:53:34Z","2007","production","success","20261004T165219Z"
+"OPTUNA_BIO_MO_125","/Users/akbaskind/Desktop/COST_FILES/ocean_sta_OPTUNA_BIO_MO_125_2005.nc","/Users/akbaskind/Desktop/COST_FILES/OPTUNA_BIO_MO_125_2005.nc","2026-10-04T16:55:04Z","2005","production","success","20261004T165219Z"
